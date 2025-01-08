@@ -1,3 +1,4 @@
+# Cabal build directories
 dist
 dist-*
 cabal-dev
@@ -16,8 +17,20 @@ cabal.sandbox.config
 *.aux
 *.hp
 *.eventlog
+.HTF/
+
+# Stack build directory (if you ever use Stack)
 .stack-work/
+
+# Cabal project config
 cabal.project.local
 cabal.project.local~
-.HTF/
+
+# GHC environment files
 .ghc.environment.*
+
+# Vim swap files, VSCode config, or OS-specific junk
+*~
+*.swp
+.vscode/
+.DS_Store
