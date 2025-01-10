@@ -1,14 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE RankNTypes #-}
 
 module Main where
 
-import Control.Monad (when)
-import Data.Aeson (FromJSON (..), Object, ToJSON (..), Value, decode, eitherDecode, encode, object, withObject, (.:), (.=))
-import Data.Aeson.Encode.Pretty (encodePretty)
+import BRH (brhBuyLogic, brhState, brhStateTransition)
+import Data.Aeson (Value, eitherDecode, encode, object, (.:), (.=))
 import Data.ByteString.Lazy.Char8 (unpack)
 import Data.Text (Text, pack)
-import Data.Time (UTCTime)
+import DataTypes (StreamData (..))
+import LVRH (lvrhBuyLogic, lvrhState, lvrhStateTransition)
 import Network.Socket (PortNumber)
 import Network.WebSockets (Connection, receiveData, sendTextData)
 import System.Environment (lookupEnv)
@@ -54,85 +54,51 @@ subscribeMessage =
 -- Our main read loop (recursive)
 --------------------------------------------------------------------------------
 
-data Trade = Trade
-  { tradeSymbol :: Text, -- Stock symbol
-    exchange :: Text, -- Exchange trade occured on
-    price :: Double, -- Trade price
-    size :: Int, -- Trade size
-    condition :: [Text], -- Trade conditions
-    tradeTimestamp :: UTCTime, -- Trade timestamp
-    tape :: Text -- Tape of symbol (ie. SPY is NYSE Arca as B)
-  }
-  deriving (Show, Eq)
-
-data Bar = Bar
-  { barSymbol :: Text, -- Stock symbol
-    open :: Double, -- Bar open price
-    high :: Double, -- Bar high price
-    low :: Double, -- Bar low price
-    close :: Double, -- Bar close price
-    volume :: Int, -- Bar volume (trade_i count x trade_i size for all i)
-    barTimestamp :: UTCTime -- Bar timestamp
-  }
-  deriving (Show, Eq)
-
-data StreamData
-  = TradeData Trade
-  | BarData Bar
-  | BarUpdateData Bar
-  deriving (Show, Eq)
-
-instance FromJSON StreamData where
-  parseJSON = withObject "StreamData" $ \v -> do
-    msgType <- v .: "T" -- Type (t, b, u for trade, bar, updated bar, respectively)
-    case (msgType :: Text) of
-      "t" ->
-        TradeData
-          <$> parseJSON (toJSON v)
-      "b" ->
-        BarData
-          <$> parseJSON (toJSON v)
-      "u" ->
-        BarUpdateData
-          <$> parseJSON (toJSON v)
-      _ -> fail $ "Unknown message type: " ++ show msgType
-
-instance FromJSON Trade where
-  parseJSON = withObject "Trade" $ \v ->
-    Trade
-      <$> v .: "S" -- Symbol
-      <*> v .: "x" -- Exchange
-      <*> v .: "p" -- Price
-      <*> v .: "s" -- Size
-      <*> v .: "c" -- Condition
-      <*> v .: "t" -- Timestamp
-      <*> v .: "z" -- Tape
-
-instance FromJSON Bar where
-  parseJSON = withObject "Bar" $ \v ->
-    Bar
-      <$> v .: "S" -- Symbol
-      <*> v .: "o" -- Open
-      <*> v .: "h" -- High
-      <*> v .: "l" -- Low
-      <*> v .: "c" -- Close
-      <*> v .: "v" -- Volume
-      <*> v .: "t" -- Timestamp
-
 handleMessage :: StreamData -> IO ()
 handleMessage (TradeData trade) = putStrLn $ "Received Trade: " ++ show trade
 handleMessage (BarData bar) = putStrLn $ "Received Bar: " ++ show bar
 handleMessage (BarUpdateData bar) = putStrLn $ "Received Bar Update: " ++ show bar
 
-readLoop :: Connection -> IO ()
-readLoop conn = do
+getNewState :: [AlgoStateF] -> (StreamData -> [AlgoStateF])
+getNewState algoStatesF streamData = map (stateTransition streamData) algoStatesF
+
+getBuyOrder :: [AlgoStateF] -> (StreamData -> [Bool])
+getBuyOrder algoStatesF streamData = map (buyLogic streamData) algoStatesF
+
+readLoop :: Connection -> [AlgoStateF] -> IO ()
+readLoop conn state = do
   rawMsg <- receiveData conn
   case eitherDecode rawMsg :: Either String [StreamData] of
-    Right messages -> mapM_ handleMessage messages
-    Left err -> putStrLn $ "Could not parse message: " ++ err
+    Right messages ->
+      mapM_
+        ( \message -> do
+            let newState = getNewState state message
+            let buyOrder = getBuyOrder newState message
+            putStrLn $ "Buy orders: " ++ show buyOrder
+            readLoop conn newState
+        )
+        messages
+    Left err -> do
+      putStrLn $ "Could not parse message: " ++ err
 
-  -- Call ourselves again (recursive)
-  readLoop conn
+      readLoop conn state
+
+data AlgoStateF
+  = LVRHState (forall y. StreamData -> (StreamData -> Int -> Int -> Int -> Int -> y) -> y)
+  | BRHState (forall y. StreamData -> (StreamData -> Int -> Int -> y) -> y)
+
+stateTransition ::
+  StreamData -> AlgoStateF -> AlgoStateF
+stateTransition d (LVRHState lvrhF) = LVRHState (lvrhF d lvrhStateTransition) -- pattern match this branch for Data -> (Data -> Int -> Int -> Int -> Int -> y) -> y --
+stateTransition (BarData bar) (BRHState brhF) = BRHState (brhF (BarData bar) brhStateTransition) -- pattern match this branch for Data -> (Data -> Int -> Int -> y) -> y --
+-- Pass-by logic if algo state not affected by current incoming data (ie. BRH algo not affected by a Trade) --
+-- We can do something like the following. This avoids calling brh_stateTransition, which in turn would generate a  new brh_state --
+stateTransition (TradeData trade) (BRHState brhF) = BRHState brhF
+
+buyLogic ::
+  StreamData -> AlgoStateF -> Bool
+buyLogic d (LVRHState lvrhF) = lvrhF d lvrhBuyLogic
+buyLogic d (BRHState brhF) = brhF d brhBuyLogic
 
 --------------------------------------------------------------------------------
 -- Main
@@ -168,32 +134,15 @@ main = do
 
         -- 5. Start reading messages in a loop
         putStrLn "Entering readLoop..."
-        readLoop conn
+
+        readLoop conn [LVRHState $ lvrhState 0 0 0 0, BRHState $ brhState 0 0]
     _ -> do
       putStrLn "ERROR: Missing environment variables."
       putStrLn "Please set ALPACA_API_KEY and ALPACA_API_SECRET."
 
 {-
-{-# LANGUAGE RankNTypes #-}
 
 data Data = Trade | Bar deriving (Show)
-
-data Algo_State_F
-  = LVRH_State (forall y. Data -> (Data -> Int -> Int -> Int -> Int -> y) -> y)
-  | BRH_State (forall y. Data -> (Data -> Int -> Int -> y) -> y)
-
-state_transition ::
-  Data -> Algo_State_F -> Algo_State_F
-state_transition d (LVRH_State lvrh_f) = LVRH_State (lvrh_f d lvrh_state_transition) -- pattern match this branch for Data -> (Data -> Int -> Int -> Int -> Int -> y) -> y --
-state_transition Bar (BRH_State brh_f) = BRH_State (brh_f Bar brh_state_transition) -- pattern match this branch for Data -> (Data -> Int -> Int -> y) -> y --
--- Pass-by logic if algo state not affected by current incoming data (ie. BRH algo not affected by a Trade) --
--- We can do something like the following. This avoids calling brh_state_transition, which in turn would generate a  new brh_state --
-state_transition Trade (BRH_State brh_f) = BRH_State brh_f
-
-buy_logic ::
-  Data -> Algo_State_F -> Bool
-buy_logic d (LVRH_State lvrh_f) = lvrh_f d lvrh_buy_logic
-buy_logic d (BRH_State brh_f) = brh_f d brh_buy_logic
 
 main :: IO ()
 main = do
