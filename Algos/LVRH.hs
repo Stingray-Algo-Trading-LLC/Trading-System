@@ -8,8 +8,8 @@ where
 import DataTypes (StreamData (..))
 
 lvrhState ::
-  Int -> Int -> Int -> Int -> (StreamData -> (StreamData -> Int -> Int -> Int -> Int -> y) -> y)
-lvrhState a b c d = \data_0 f -> f data_0 a b c d
+  Int -> Int -> Int -> Int -> StreamData -> (StreamData -> Int -> Int -> Int -> Int -> y) -> y
+lvrhState a b c d streamData func = func streamData a b c d
 
 lvrhStateTransition ::
   StreamData -> Int -> Int -> Int -> Int -> (StreamData -> (StreamData -> Int -> Int -> Int -> Int -> y) -> y)

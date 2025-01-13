@@ -59,6 +59,21 @@ handleMessage (TradeData trade) = putStrLn $ "Received Trade: " ++ show trade
 handleMessage (BarData bar) = putStrLn $ "Received Bar: " ++ show bar
 handleMessage (BarUpdateData bar) = putStrLn $ "Received Bar Update: " ++ show bar
 
+data AlgoStateF
+  = LVRHState (forall y. StreamData -> (StreamData -> Int -> Int -> Int -> Int -> y) -> y)
+  | BRHState (forall y. StreamData -> (StreamData -> Int -> Int -> y) -> y)
+
+stateTransition :: StreamData -> AlgoStateF -> AlgoStateF
+stateTransition d (LVRHState lvrhF) = LVRHState (lvrhF d lvrhStateTransition) -- pattern match this branch for Data -> (Data -> Int -> Int -> Int -> Int -> y) -> y --
+stateTransition (BarData bar) (BRHState brhF) = BRHState (brhF (BarData bar) brhStateTransition) -- pattern match this branch for Data -> (Data -> Int -> Int -> y) -> y --
+-- Pass-by logic if algo state not affected by current incoming data (ie. BRH algo not affected by a Trade) --
+-- We can do something like the following. This avoids calling brh_stateTransition, which in turn would generate a  new brh_state --
+stateTransition (TradeData trade) (BRHState brhF) = BRHState brhF
+
+buyLogic :: StreamData -> AlgoStateF -> Bool
+buyLogic d (LVRHState lvrhF) = lvrhF d lvrhBuyLogic
+buyLogic d (BRHState brhF) = brhF d brhBuyLogic
+
 getNewState :: [AlgoStateF] -> (StreamData -> [AlgoStateF])
 getNewState algoStatesF streamData = map (stateTransition streamData) algoStatesF
 
@@ -82,23 +97,6 @@ readLoop conn state = do
       putStrLn $ "Could not parse message: " ++ err
 
       readLoop conn state
-
-data AlgoStateF
-  = LVRHState (forall y. StreamData -> (StreamData -> Int -> Int -> Int -> Int -> y) -> y)
-  | BRHState (forall y. StreamData -> (StreamData -> Int -> Int -> y) -> y)
-
-stateTransition ::
-  StreamData -> AlgoStateF -> AlgoStateF
-stateTransition d (LVRHState lvrhF) = LVRHState (lvrhF d lvrhStateTransition) -- pattern match this branch for Data -> (Data -> Int -> Int -> Int -> Int -> y) -> y --
-stateTransition (BarData bar) (BRHState brhF) = BRHState (brhF (BarData bar) brhStateTransition) -- pattern match this branch for Data -> (Data -> Int -> Int -> y) -> y --
--- Pass-by logic if algo state not affected by current incoming data (ie. BRH algo not affected by a Trade) --
--- We can do something like the following. This avoids calling brh_stateTransition, which in turn would generate a  new brh_state --
-stateTransition (TradeData trade) (BRHState brhF) = BRHState brhF
-
-buyLogic ::
-  StreamData -> AlgoStateF -> Bool
-buyLogic d (LVRHState lvrhF) = lvrhF d lvrhBuyLogic
-buyLogic d (BRHState brhF) = brhF d brhBuyLogic
 
 --------------------------------------------------------------------------------
 -- Main

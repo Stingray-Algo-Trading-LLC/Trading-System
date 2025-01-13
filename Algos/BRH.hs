@@ -8,8 +8,8 @@ where
 import DataTypes (StreamData (..))
 
 brhState ::
-  Int -> Int -> (StreamData -> (StreamData -> Int -> Int -> y) -> y)
-brhState a b = \data_0 f -> f data_0 a b
+  Int -> Int -> StreamData -> (StreamData -> Int -> Int -> y) -> y
+brhState a b streamData func = func streamData a b
 
 brhStateTransition ::
   StreamData -> Int -> Int -> (StreamData -> (StreamData -> Int -> Int -> y) -> y)
