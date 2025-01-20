@@ -1,3 +1,7 @@
+{-# LANGUAGE ImportQualifiedPost #-}
+
+module Utils (getSaleCondition) where
+
 import Data.Char (ord)
 import Data.Set qualified as Set
 

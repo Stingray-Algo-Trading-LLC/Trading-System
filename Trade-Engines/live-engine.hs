@@ -1,14 +1,15 @@
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 
 module Main where
 
-import BRH (brhBuyLogic, brhState, brhStateTransition)
+import BRH (BRHStateParam (..), brhBuyLogic, brhState, brhStateTransition)
 import Data.Aeson (Value, eitherDecode, encode, object, (.:), (.=))
 import Data.ByteString.Lazy.Char8 (unpack)
 import Data.Text (Text, pack)
 import DataTypes (StreamData (..))
-import LVRH (lvrhBuyLogic, lvrhState, lvrhStateTransition)
+import LVRH (LVRHStateParam (..), lvrhBuyLogic, lvrhState, lvrhStateTransition)
 import Network.Socket (PortNumber)
 import Network.WebSockets (Connection, receiveData, sendTextData)
 import System.Environment (lookupEnv)
@@ -59,28 +60,28 @@ handleMessage (TradeData trade) = putStrLn $ "Received Trade: " ++ show trade
 handleMessage (BarData bar) = putStrLn $ "Received Bar: " ++ show bar
 handleMessage (BarUpdateData bar) = putStrLn $ "Received Bar Update: " ++ show bar
 
-data AlgoStateF
-  = LVRHState (forall y. StreamData -> (StreamData -> Int -> Int -> Int -> Int -> y) -> y)
-  | BRHState (forall y. StreamData -> (StreamData -> Int -> Int -> y) -> y)
+data AlgoState
+  = LVRHState (forall y. StreamData -> (LVRHStateParam -> StreamData -> y) -> y)
+  | BRHState (forall y. StreamData -> (BRHStateParam -> StreamData -> y) -> y)
 
-stateTransition :: StreamData -> AlgoStateF -> AlgoStateF
-stateTransition d (LVRHState lvrhF) = LVRHState (lvrhF d lvrhStateTransition) -- pattern match this branch for Data -> (Data -> Int -> Int -> Int -> Int -> y) -> y --
+stateTransition :: StreamData -> AlgoState -> AlgoState
+stateTransition streamData (LVRHState lvrhF) = LVRHState (lvrhF streamData lvrhStateTransition) -- pattern match this branch for Data -> (Data -> Int -> Int -> Int -> Int -> y) -> y --
 stateTransition (BarData bar) (BRHState brhF) = BRHState (brhF (BarData bar) brhStateTransition) -- pattern match this branch for Data -> (Data -> Int -> Int -> y) -> y --
 -- Pass-by logic if algo state not affected by current incoming data (ie. BRH algo not affected by a Trade) --
 -- We can do something like the following. This avoids calling brh_stateTransition, which in turn would generate a  new brh_state --
 stateTransition (TradeData trade) (BRHState brhF) = BRHState brhF
 
-buyLogic :: StreamData -> AlgoStateF -> Bool
-buyLogic d (LVRHState lvrhF) = lvrhF d lvrhBuyLogic
-buyLogic d (BRHState brhF) = brhF d brhBuyLogic
+buyLogic :: StreamData -> AlgoState -> Bool
+buyLogic streamData (LVRHState lvrhF) = lvrhF streamData lvrhBuyLogic
+buyLogic streamData (BRHState brhF) = brhF streamData brhBuyLogic
 
-getNewState :: [AlgoStateF] -> (StreamData -> [AlgoStateF])
+getNewState :: [AlgoState] -> (StreamData -> [AlgoState])
 getNewState algoStatesF streamData = map (stateTransition streamData) algoStatesF
 
-getBuyOrder :: [AlgoStateF] -> (StreamData -> [Bool])
+getBuyOrder :: [AlgoState] -> (StreamData -> [Bool])
 getBuyOrder algoStatesF streamData = map (buyLogic streamData) algoStatesF
 
-readLoop :: Connection -> [AlgoStateF] -> IO ()
+readLoop :: Connection -> [AlgoState] -> IO ()
 readLoop conn state = do
   rawMsg <- receiveData conn
   case eitherDecode rawMsg :: Either String [StreamData] of
@@ -133,7 +134,29 @@ main = do
         -- 5. Start reading messages in a loop
         putStrLn "Entering readLoop..."
 
-        readLoop conn [LVRHState $ lvrhState 0 0 0 0, BRHState $ brhState 0 0]
+        let lvrhInitParams =
+              LVRHStateParam
+                { openPrice = 0.0,
+                  highPrice = 0.0,
+                  lowPrice = 0.0,
+                  lastPrice = 0.0,
+                  openTime = 0.0,
+                  firstTime = 0.0,
+                  lastTime = 0.0
+                }
+
+        let brhInitParams =
+              BRHStateParam
+                { openPrice = 0.0,
+                  highPrice = 0.0,
+                  lowPrice = 0.0,
+                  lastPrice = 0.0,
+                  openTime = 0.0,
+                  firstTime = 0.0,
+                  lastTime = 0.0
+                }
+
+        readLoop conn [LVRHState $ lvrhState lvrhInitParams, BRHState $ brhState brhInitParams]
     _ -> do
       putStrLn "ERROR: Missing environment variables."
       putStrLn "Please set ALPACA_API_KEY and ALPACA_API_SECRET."

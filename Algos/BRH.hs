@@ -2,25 +2,31 @@ module BRH
   ( brhState,
     brhBuyLogic,
     brhStateTransition,
+    BRHStateParam (..),
   )
 where
 
+import Data.ByteString (last)
 import DataTypes (StreamData (..))
 
-brhState ::
-  Int -> Int -> StreamData -> (StreamData -> Int -> Int -> y) -> y
-brhState a b streamData func = func streamData a b
+data BRHStateParam
+  = BRHStateParam
+  { openPrice :: Double, -- First qualifying trade price.
+    highPrice :: Double, -- Highest price of all qualifying trades thus far.
+    lowPrice :: Double, -- Lowest price of all qualifying trades thus far.
+    lastPrice :: Double, -- Last qualifying trade price. This algo only assumes trades with condition code 1.
+    openTime :: Double, -- The Unix timestamp of the last trade to update openPrice.
+    firstTime :: Double, -- The Unix timestamp of the earliest trade received, condition code is irrelevant.
+    lastTime :: Double -- The Unix timestamp of the last trade to update lastPrice.
+  }
 
-brhStateTransition ::
-  StreamData -> Int -> Int -> (StreamData -> (StreamData -> Int -> Int -> y) -> y)
-brhStateTransition (TradeData trade) a b =
-  let new_a = a + 1000
-   in brhState new_a b
-brhStateTransition (BarData bar) a b =
-  let new_b = b + 2000
-   in brhState a new_b
+brhState :: BRHStateParam -> StreamData -> (BRHStateParam -> StreamData -> y) -> y
+brhState stateParam streamData func = func stateParam streamData
 
-brhBuyLogic ::
-  StreamData -> Int -> Int -> Bool
-brhBuyLogic (TradeData trade) a b = False
-brhBuyLogic (BarData bar) a b = True
+brhStateTransition :: BRHStateParam -> StreamData -> (StreamData -> (BRHStateParam -> StreamData -> y) -> y)
+brhStateTransition stateParam (TradeData trade) = brhState $ stateParam {openPrice = 10.0}
+brhStateTransition stateParam (BarData bar) = brhState $ stateParam {lastPrice = 1.0}
+
+brhBuyLogic :: BRHStateParam -> StreamData -> Bool
+brhBuyLogic stateParam (TradeData trade) = False
+brhBuyLogic stateParam (BarData bar) = True

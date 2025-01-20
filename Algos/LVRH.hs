@@ -2,27 +2,31 @@ module LVRH
   ( lvrhState,
     lvrhBuyLogic,
     lvrhStateTransition,
+    LVRHStateParam (..),
   )
 where
 
 import DataTypes (StreamData (..))
+import Utils (getSaleCondition)
 
-lvrhState ::
-  Int -> Int -> Int -> Int -> StreamData -> (StreamData -> Int -> Int -> Int -> Int -> y) -> y
-lvrhState a b c d streamData func = func streamData a b c d
+data LVRHStateParam
+  = LVRHStateParam
+  { openPrice :: Double, -- First qualifying trade price.
+    highPrice :: Double, -- Highest price of all qualifying trades thus far.
+    lowPrice :: Double, -- Lowest price of all qualifying trades thus far.
+    lastPrice :: Double, -- Last qualifying trade price. This algo only assumes trades with condition code 1.
+    openTime :: Double, -- The Unix timestamp of the last trade to update openPrice.
+    firstTime :: Double, -- The Unix timestamp of the earliest trade received, condition code is irrelevant.
+    lastTime :: Double -- The Unix timestamp of the last trade to update lastPrice.
+  }
 
-lvrhStateTransition ::
-  StreamData -> Int -> Int -> Int -> Int -> (StreamData -> (StreamData -> Int -> Int -> Int -> Int -> y) -> y)
-lvrhStateTransition (TradeData trade) a b c d =
-  let new_a = a + 10
-      new_b = b + 100
-   in lvrhState new_a new_b c d
-lvrhStateTransition (BarData bar) a b c d =
-  let new_c = c + 200
-      new_d = d + 300
-   in lvrhState a b new_c new_d
+lvrhState :: LVRHStateParam -> StreamData -> (LVRHStateParam -> StreamData -> y) -> y
+lvrhState stateParams streamData func = func stateParams streamData
 
-lvrhBuyLogic ::
-  StreamData -> Int -> Int -> Int -> Int -> Bool
-lvrhBuyLogic (TradeData trade) a b c d = True
-lvrhBuyLogic (BarData bar) a b c d = False
+lvrhStateTransition :: LVRHStateParam -> StreamData -> (StreamData -> (LVRHStateParam -> StreamData -> y) -> y)
+lvrhStateTransition stateParams (TradeData trade) = lvrhState $ stateParams {openPrice = 10.0}
+lvrhStateTransition stateParams (BarData bar) = lvrhState $ stateParams {lastPrice = 1.0}
+
+lvrhBuyLogic :: LVRHStateParam -> StreamData -> Bool
+lvrhBuyLogic stateParams (TradeData trade) = True
+lvrhBuyLogic stateParams (BarData bar) = False
