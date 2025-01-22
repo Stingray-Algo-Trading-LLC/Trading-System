@@ -9,7 +9,7 @@ module DataTypes
 where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.:))
-import Data.Text (Text)
+import Data.Text (Text, unpack)
 import Data.Time (UTCTime)
 
 --------------------------------------------------------------------------------
@@ -20,7 +20,7 @@ data Trade = Trade
     exchange :: Text, -- Exchange trade occured on
     price :: Double, -- Trade price
     size :: Int, -- Trade size
-    condition :: [Text], -- Trade conditions
+    condition :: [Char], -- Trade conditions
     tradeTimestamp :: UTCTime, -- Trade timestamp
     tape :: Text -- Tape of symbol (ie. SPY is NYSE Arca as B)
   }
@@ -69,7 +69,7 @@ instance FromJSON Trade where
       <*> v .: "x" -- Exchange
       <*> v .: "p" -- Price
       <*> v .: "s" -- Size
-      <*> v .: "c" -- Condition
+      <*> (map (head . unpack) <$> v .: "c") -- Condition, Convert [Text] -> [Char]
       <*> v .: "t" -- Timestamp
       <*> v .: "z" -- Tape
 
