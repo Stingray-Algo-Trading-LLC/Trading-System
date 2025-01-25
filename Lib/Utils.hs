@@ -77,75 +77,72 @@ generateRightBoundaryPointsVector maskMat =
           -- Otherwise, it is index of the first 1.0.
        in [fromIntegral $ size row, fromIntegral maxIndxInRow] !! valAtMaxIndxOfRow
 
-generateProximityMaskMatrix :: Vector Double -> Vector Double -> Double -> Double -> Double -> Double -> Matrix Double
-generateProximityMaskMatrix vecA vecB lowerBound upperBound rtol atol =
+generateProximityMaskMatrix :: Vector Double -> Vector Double -> Double -> Double -> (Double -> Double -> Double) -> Matrix Double
+generateProximityMaskMatrix vecA vecB lowerBound upperBound areValsClose =
   andMat lowerProximityMaskMatrix upperProximityMaskMatrix
   where
     distanceMatrix = diffMatrix vecA vecB
-    areDistsCloseOr = compareMat rtol atol
-    areDistsGTELowerBound = isMatGTE distanceMatrix (Scalar lowerBound)
-    areDistsLTEUpperBound = isMatLTE distanceMatrix (Scalar upperBound)
-    lowerProximityMaskMatrix = areDistsCloseOr areDistsGTELowerBound
-    upperProximityMaskMatrix = areDistsCloseOr areDistsLTEUpperBound
+    areDistsGTELowerBoundOr = isMatGTE distanceMatrix (Scalar lowerBound)
+    areDistsLTEUpperBoundOr = isMatLTE distanceMatrix (Scalar upperBound)
+    lowerProximityMaskMatrix = areDistsGTELowerBoundOr areValsClose
+    upperProximityMaskMatrix = areDistsLTEUpperBoundOr areValsClose
 
 isClose :: Double -> Double -> Double -> Double -> Double
-isClose valA valB rtol atol = if v <= 1 then 1.0 else 0.0
+isClose rtol atol valA valB = if v <= 1 then 1.0 else 0.0
   where
     v = abs (valA - valB) / (atol + rtol * valB)
 
-compareMat :: Double -> Double -> (Double -> Double -> Matrix Double) -> Matrix Double
-compareMat rtol atol compF = compF rtol atol
-
 data MatrixOrScalar = Scalar Double | MatD (Matrix Double)
 
-isMatEQ :: Matrix Double -> MatrixOrScalar -> Double -> Double -> Matrix Double
-isMatEQ matA (Scalar valB) rtol atol = cmap (\mElem -> if mElem == valB then 1.0 else isClose mElem valB rtol atol) matA
-isMatEQ matA (MatD matB) rtol atol = cmap (\mElem -> if mElem == 0.0 then 1.0 else isClose mElem 0 rtol atol) (matA - matB)
+isMatEQ :: Matrix Double -> MatrixOrScalar -> (Double -> Double -> Double) -> Matrix Double
+isMatEQ matA (Scalar valB) areValsClose = cmap (\mElem -> if mElem == valB then 1.0 else areValsClose mElem valB) matA
+isMatEQ matA (MatD matB) areValsClose = cmap (\mElem -> if mElem == 0.0 then 1.0 else areValsClose mElem 0.0) (matA - matB)
 
-isMatGT :: Matrix Double -> MatrixOrScalar -> Double -> Double -> Matrix Double
-isMatGT matA (Scalar valB) rtol atol =
-  cmap (\mElem -> if (mElem > valB) && (isClose mElem valB rtol atol == 0.0) then 1.0 else 0.0) matA
-isMatGT matA (MatD matB) rtol atol =
-  cmap (\mElem -> if (mElem > 0.0) && (isClose mElem 0.0 rtol atol == 0.0) then 1.0 else 0.0) (matA - matB)
+isMatGT :: Matrix Double -> MatrixOrScalar -> (Double -> Double -> Double) -> Matrix Double
+isMatGT matA (Scalar valB) areValsClose =
+  cmap (\mElem -> if (mElem > valB) && (areValsClose mElem valB == 0.0) then 1.0 else 0.0) matA
+isMatGT matA (MatD matB) areValsClose =
+  cmap (\mElem -> if (mElem > 0.0) && (areValsClose mElem 0.0 == 0.0) then 1.0 else 0.0) (matA - matB)
 
-isMatLT :: Matrix Double -> MatrixOrScalar -> Double -> Double -> Matrix Double
-isMatLT matA (Scalar valB) rtol atol =
-  cmap (\mElem -> if (mElem < valB) && (isClose mElem valB rtol atol == 0.0) then 1.0 else 0.0) matA
-isMatLT matA (MatD matB) rtol atol =
-  cmap (\mElem -> if (mElem < 0.0) && (isClose mElem 0.0 rtol atol == 0.0) then 1.0 else 0.0) (matA - matB)
+isMatLT :: Matrix Double -> MatrixOrScalar -> (Double -> Double -> Double) -> Matrix Double
+isMatLT matA (Scalar valB) areValsClose =
+  cmap (\mElem -> if (mElem < valB) && (areValsClose mElem valB == 0.0) then 1.0 else 0.0) matA
+isMatLT matA (MatD matB) areValsClose =
+  cmap (\mElem -> if (mElem < 0.0) && (areValsClose mElem 0.0 == 0.0) then 1.0 else 0.0) (matA - matB)
 
-isMatGTE :: Matrix Double -> MatrixOrScalar -> Double -> Double -> Matrix Double
-isMatGTE matA (Scalar valB) rtol atol =
-  cmap (\mElem -> if mElem >= valB then 1.0 else isClose mElem valB rtol atol) matA
-isMatGTE matA (MatD matB) rtol atol =
-  cmap (\mElem -> if mElem >= 0.0 then 1.0 else isClose mElem 0.0 rtol atol) (matA - matB)
+isMatGTE :: Matrix Double -> MatrixOrScalar -> (Double -> Double -> Double) -> Matrix Double
+isMatGTE matA (Scalar valB) areValsClose =
+  cmap (\mElem -> if mElem >= valB then 1.0 else areValsClose mElem valB) matA
+isMatGTE matA (MatD matB) areValsClose =
+  cmap (\mElem -> if mElem >= 0.0 then 1.0 else areValsClose mElem 0.0) (matA - matB)
 
-isMatLTE :: Matrix Double -> MatrixOrScalar -> Double -> Double -> Matrix Double
-isMatLTE matA (Scalar valB) rtol atol =
-  cmap (\mElem -> if mElem <= valB then 1.0 else isClose mElem valB rtol atol) matA
-isMatLTE matA (MatD matB) rtol atol =
-  cmap (\mElem -> if mElem <= 0.0 then 1.0 else isClose mElem 0.0 rtol atol) (matA - matB)
+isMatLTE :: Matrix Double -> MatrixOrScalar -> (Double -> Double -> Double) -> Matrix Double
+isMatLTE matA (Scalar valB) areValsClose =
+  cmap (\mElem -> if mElem <= valB then 1.0 else areValsClose mElem valB) matA
+isMatLTE matA (MatD matB) areValsClose =
+  cmap (\mElem -> if mElem <= 0.0 then 1.0 else areValsClose mElem 0.0) (matA - matB)
 
 andMat :: Matrix Double -> Matrix Double -> Matrix Double
 andMat maskMatA maskMatB = maskMatA * maskMatB
 
-generateInBoundsMaskMatrix :: Vector Double -> Vector Double -> Double -> Double -> Matrix Double
-generateInBoundsMaskMatrix vecA vecB rtol atol =
+generateInBoundsMaskMatrix :: Vector Double -> Vector Double -> (Double -> Double -> Double) -> Matrix Double
+generateInBoundsMaskMatrix vecA vecB areValsClose =
   andMat leftBoundaryMaskMat rightBoundaryMaskMat
   where
-    boundaryMaskMat = isMatGT (diffMatrix vecA vecB) (Scalar 0.0) rtol atol
+    boundaryMaskMat = isMatGT (diffMatrix vecA vecB) (Scalar 0.0) areValsClose
     cols = fromList [0.0 .. fromIntegral (size vecB - 1)]
-    isCloseOr = compareMat rtol atol
-    leftBoundaryMaskMat = isCloseOr (isMatGT (diffMatrix cols (generateLeftBoundaryPointsVector boundaryMaskMat)) (Scalar 0.0))
-    rightBoundaryMaskMat = isCloseOr (isMatLT (diffMatrix cols (generateRightBoundaryPointsVector boundaryMaskMat)) (Scalar 0.0))
+    getDiffFromColsMat = diffMatrix cols
+    leftBoundaryMaskMat = isMatGT (getDiffFromColsMat $ generateLeftBoundaryPointsVector boundaryMaskMat) (Scalar 0.0) areValsClose
+    rightBoundaryMaskMat = isMatLT (getDiffFromColsMat $ generateRightBoundaryPointsVector boundaryMaskMat) (Scalar 0.0) areValsClose
 
 resistanceLevels :: Vector Double -> Vector Double -> Double -> Double -> Double -> Double -> Double -> Vector Double
 resistanceLevels barTopsVec barHighVec pillarThresh lowerBound upperBound rtol atol =
   fromList (filter (> 0.0) (toList qualifyingLevelsMaskVec))
   where
-    proximityMaskMat = generateProximityMaskMatrix barHighVec barHighVec lowerBound upperBound rtol atol
-    inBoundsMaskMat = generateInBoundsMaskMatrix barTopsVec barHighVec rtol atol
-    pillarMatrix = andMat proximityMaskMat inBoundsMaskMat
+    areValsClose = isClose rtol atol
+    proximityMaskMat = generateProximityMaskMatrix barHighVec barHighVec lowerBound upperBound areValsClose
+    inBoundsMaskMat = generateInBoundsMaskMatrix barTopsVec barHighVec areValsClose
+    pillarMaskMat = andMat proximityMaskMat inBoundsMaskMat
     qualifyingLevelsMaskVec =
-      fromList (map (\row -> if sumElements row >= pillarThresh then 1.0 else 0.0) (toRows pillarMatrix))
+      fromList (map (\row -> if sumElements row >= pillarThresh then 1.0 else 0.0) (toRows pillarMaskMat))
         * barHighVec
