@@ -1,4 +1,4 @@
-module BRH
+module Algos.BRH
   ( brhState,
     brhBuyLogic,
     brhStateTransition,
@@ -6,8 +6,7 @@ module BRH
   )
 where
 
-import Data.ByteString (last)
-import DataTypes (StreamData (..))
+import Lib.DataTypes (StreamData (..))
 
 data BRHStateParam
   = BRHStateParam

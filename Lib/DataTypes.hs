@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module DataTypes
+module Lib.DataTypes
   ( Trade (..),
     Bar (..),
     StreamData (..),

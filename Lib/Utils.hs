@@ -1,7 +1,11 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ImportQualifiedPost #-}
+{-# LANGUAGE TypeOperators #-}
 
-module Utils (getSaleCondition, utcToUnixSeconds) where
+module Lib.Utils (getSaleCondition, utcToUnixSeconds) where
 
+import Data.Array.Accelerate as A
+import Data.Array.Accelerate.LLVM.PTX as GPU -- or .LLVM.Native for CPU backend
 import Data.Char (ord)
 import Data.Set qualified as Set
 import Data.Time (UTCTime)
@@ -35,24 +39,37 @@ utcToUnixSeconds utcTime = realToFrac (utcTimeToPOSIXSeconds utcTime)
 --------------------------------------------------------------------------------
 -- Functions to Compute Resistance Levels
 --------------------------------------------------------------------------------
-diffMatrix :: Vector Double -> Vector Double -> Matrix Double
-diffMatrix vecA vecB = asRow vecA - asColumn vecB
+resistanceLevels :: Vector Double -> Vector Double -> Double -> Double -> Double -> Double -> Double -> Vector Double
+resistanceLevels barTopsVec barHighVec pillarThresh lowerBound upperBound rtol atol =
+  fromList (filter (> 0.0) (toList qualifyingLevelsMaskVec))
+  where
+    areValsClose = isClose rtol atol
+    proximityMaskMat = generateProximityMaskMatrix barHighVec barHighVec lowerBound upperBound areValsClose
+    inBoundsMaskMat = generateInBoundsMaskMatrix barTopsVec barHighVec areValsClose
+    pillarMaskMat = andMat proximityMaskMat inBoundsMaskMat
+    qualifyingLevelsMaskVec =
+      fromList (map (\row -> if sumElements row >= pillarThresh then 1.0 else 0.0) (toRows pillarMaskMat))
+        * barHighVec
 
--- Upper triangular mask
-generateUpperTriMaskMatrix :: (Int, Int) -> Int -> Matrix Double
-generateUpperTriMaskMatrix (rows, cols) k =
-  fromLists [[if j >= i + k then 1.0 else 0.0 | j <- [0 .. cols - 1]] | i <- [0 .. rows - 1]]
+generateProximityMaskMatrix :: Vector Double -> Vector Double -> Double -> Double -> (Double -> Double -> Double) -> Matrix Double
+generateProximityMaskMatrix vecA vecB lowerBound upperBound areValsClose =
+  andMat lowerProximityMaskMatrix upperProximityMaskMatrix
+  where
+    distanceMatrix = generateDiffMatrix vecA vecB
+    areDistsGTELowerBoundOr = isMatGTE distanceMatrix (Scalar lowerBound)
+    areDistsLTEUpperBoundOr = isMatLTE distanceMatrix (Scalar upperBound)
+    lowerProximityMaskMatrix = areDistsGTELowerBoundOr areValsClose
+    upperProximityMaskMatrix = areDistsLTEUpperBoundOr areValsClose
 
--- Lower triangular mask
-generateLowerTriMaskMatrix :: (Int, Int) -> Int -> Matrix Double
-generateLowerTriMaskMatrix (rows, cols) k =
-  fromLists [[if j <= i + k then 1.0 else 0.0 | j <- [0 .. cols - 1]] | i <- [0 .. rows - 1]]
-
-generateLeftMaskMatrix :: Matrix Double -> Matrix Double
-generateLeftMaskMatrix maskMat = andMat maskMat (generateLowerTriMaskMatrix (size maskMat) (-1))
-
-generateRightMaskMatrix :: Matrix Double -> Matrix Double
-generateRightMaskMatrix maskMat = andMat maskMat (generateUpperTriMaskMatrix (size maskMat) 1)
+generateInBoundsMaskMatrix :: Vector Double -> Vector Double -> (Double -> Double -> Double) -> Matrix Double
+generateInBoundsMaskMatrix vecA vecB areValsClose =
+  andMat leftBoundaryMaskMat rightBoundaryMaskMat
+  where
+    boundaryMaskMat = isMatGT (generateDiffMatrix vecA vecB) (Scalar 0.0) areValsClose
+    cols = fromList [0.0 .. fromIntegral (size vecB - 1)]
+    getDiffFromColsMat = generateDiffMatrix cols
+    leftBoundaryMaskMat = isMatGT (getDiffFromColsMat $ generateLeftBoundaryPointsVector boundaryMaskMat) (Scalar 0.0) areValsClose
+    rightBoundaryMaskMat = isMatLT (getDiffFromColsMat $ generateRightBoundaryPointsVector boundaryMaskMat) (Scalar 0.0) areValsClose
 
 generateLeftBoundaryPointsVector :: Matrix Double -> Vector Double
 generateLeftBoundaryPointsVector maskMat =
@@ -77,15 +94,24 @@ generateRightBoundaryPointsVector maskMat =
           -- Otherwise, it is index of the first 1.0.
        in [fromIntegral $ size row, fromIntegral maxIndxInRow] !! valAtMaxIndxOfRow
 
-generateProximityMaskMatrix :: Vector Double -> Vector Double -> Double -> Double -> (Double -> Double -> Double) -> Matrix Double
-generateProximityMaskMatrix vecA vecB lowerBound upperBound areValsClose =
-  andMat lowerProximityMaskMatrix upperProximityMaskMatrix
-  where
-    distanceMatrix = diffMatrix vecA vecB
-    areDistsGTELowerBoundOr = isMatGTE distanceMatrix (Scalar lowerBound)
-    areDistsLTEUpperBoundOr = isMatLTE distanceMatrix (Scalar upperBound)
-    lowerProximityMaskMatrix = areDistsGTELowerBoundOr areValsClose
-    upperProximityMaskMatrix = areDistsLTEUpperBoundOr areValsClose
+generateDiffMatrix :: Vector Double -> Vector Double -> Matrix Double
+generateDiffMatrix vecA vecB = asRow vecA - asColumn vecB
+
+-- Upper triangular mask
+generateUpperTriMaskMatrix :: (Int, Int) -> Int -> Matrix Double
+generateUpperTriMaskMatrix (rows, cols) k =
+  fromLists [[if j >= i + k then 1.0 else 0.0 | j <- [0 .. cols - 1]] | i <- [0 .. rows - 1]]
+
+-- Lower triangular mask
+generateLowerTriMaskMatrix :: (Int, Int) -> Int -> Matrix Double
+generateLowerTriMaskMatrix (rows, cols) k =
+  fromLists [[if j <= i + k then 1.0 else 0.0 | j <- [0 .. cols - 1]] | i <- [0 .. rows - 1]]
+
+generateLeftMaskMatrix :: Matrix Double -> Matrix Double
+generateLeftMaskMatrix maskMat = andMat maskMat (generateLowerTriMaskMatrix (size maskMat) (-1))
+
+generateRightMaskMatrix :: Matrix Double -> Matrix Double
+generateRightMaskMatrix maskMat = andMat maskMat (generateUpperTriMaskMatrix (size maskMat) 1)
 
 isClose :: Double -> Double -> Double -> Double -> Double
 isClose rtol atol valA valB = if v <= 1 then 1.0 else 0.0
@@ -124,25 +150,3 @@ isMatLTE matA (MatD matB) areValsClose =
 
 andMat :: Matrix Double -> Matrix Double -> Matrix Double
 andMat maskMatA maskMatB = maskMatA * maskMatB
-
-generateInBoundsMaskMatrix :: Vector Double -> Vector Double -> (Double -> Double -> Double) -> Matrix Double
-generateInBoundsMaskMatrix vecA vecB areValsClose =
-  andMat leftBoundaryMaskMat rightBoundaryMaskMat
-  where
-    boundaryMaskMat = isMatGT (diffMatrix vecA vecB) (Scalar 0.0) areValsClose
-    cols = fromList [0.0 .. fromIntegral (size vecB - 1)]
-    getDiffFromColsMat = diffMatrix cols
-    leftBoundaryMaskMat = isMatGT (getDiffFromColsMat $ generateLeftBoundaryPointsVector boundaryMaskMat) (Scalar 0.0) areValsClose
-    rightBoundaryMaskMat = isMatLT (getDiffFromColsMat $ generateRightBoundaryPointsVector boundaryMaskMat) (Scalar 0.0) areValsClose
-
-resistanceLevels :: Vector Double -> Vector Double -> Double -> Double -> Double -> Double -> Double -> Vector Double
-resistanceLevels barTopsVec barHighVec pillarThresh lowerBound upperBound rtol atol =
-  fromList (filter (> 0.0) (toList qualifyingLevelsMaskVec))
-  where
-    areValsClose = isClose rtol atol
-    proximityMaskMat = generateProximityMaskMatrix barHighVec barHighVec lowerBound upperBound areValsClose
-    inBoundsMaskMat = generateInBoundsMaskMatrix barTopsVec barHighVec areValsClose
-    pillarMaskMat = andMat proximityMaskMat inBoundsMaskMat
-    qualifyingLevelsMaskVec =
-      fromList (map (\row -> if sumElements row >= pillarThresh then 1.0 else 0.0) (toRows pillarMaskMat))
-        * barHighVec

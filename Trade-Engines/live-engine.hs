@@ -1,15 +1,17 @@
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 
 module Main where
 
-import BRH (BRHStateParam (..), brhBuyLogic, brhState, brhStateTransition)
+import Algos.BRH (BRHStateParam (..), brhBuyLogic, brhState, brhStateTransition)
+import Algos.LVRH (LVRHStateParam (..), lvrhBuyLogic, lvrhState, lvrhStateTransition)
 import Data.Aeson (Value, eitherDecode, encode, object, (.:), (.=))
 import Data.ByteString.Lazy.Char8 (unpack)
+import Data.ByteString.Lazy.Char8 qualified as BL
 import Data.Text (Text, pack)
-import DataTypes (StreamData (..))
-import LVRH (LVRHStateParam (..), lvrhBuyLogic, lvrhState, lvrhStateTransition)
+import Lib.DataTypes (StreamData (..))
 import Network.Socket (PortNumber)
 import Network.WebSockets (Connection, receiveData, sendTextData)
 import System.Environment (lookupEnv)
@@ -83,13 +85,15 @@ getBuyOrder algoStatesF streamData = map (buyLogic streamData) algoStatesF
 
 readLoop :: Connection -> [AlgoState] -> IO ()
 readLoop conn state = do
-  rawMsg <- receiveData conn
+  -- rawMsg <- receiveData conn
+  let rawMsg = BL.pack $ "[{\"T\":\"t\",\"i\":96921,\"S\":\"AAPL\",\"x\":\"D\",\"p\":126.55,\"s\":1,\"t\":\"2021-02-22T15:51:44.208Z\",\"c\":[\"@\",\"I\"],\"z\":\"C\"}]"
   case eitherDecode rawMsg :: Either String [StreamData] of
     Right messages ->
       mapM_
         ( \message -> do
             let newState = getNewState state message
             let buyOrder = getBuyOrder newState message
+            handleMessage message
             putStrLn $ "Buy orders: " ++ show buyOrder
             readLoop conn newState
         )
