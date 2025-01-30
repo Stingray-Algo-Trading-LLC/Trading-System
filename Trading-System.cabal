@@ -7,10 +7,13 @@ build-type:          Simple
 library
   exposed-modules:
     Lib.DataTypes,
+    Lib.Utils,
+    Lib.Levels,
+    Lib.LevelsAccel,
     Algos.LVRH,
     Algos.BRH
   other-modules:
-    Lib.Utils
+    
   build-depends:
     base >=4.14 && <4.15,
     containers >=0.6 && <0.7,
