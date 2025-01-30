@@ -16,12 +16,12 @@ library
     
   build-depends:
     base >=4.14 && <4.15,
-    containers >=0.6 && <0.7,
+    containers,
     aeson,
     text,
-    time >=1.9.3 && <1.13,
+    time,
     bytestring,
-    hmatrix >=0.20.2,
+    hmatrix,
     accelerate,
     accelerate-llvm-ptx
   default-language: Haskell2010
@@ -33,15 +33,15 @@ executable live-engine
   build-depends: 
     Trading-System,      
     base >=4.14 && <4.15,
-    hmatrix >= 0.20.2,
+    hmatrix,
     websockets,
     network,
     wuss,
     aeson,
     bytestring,
     text,
-    time >=1.9.3 && <1.13,
-    containers >=0.6 && <0.7,
+    time,
+    containers,
     accelerate,
     accelerate-llvm-ptx
   default-language:     Haskell2010
@@ -52,7 +52,7 @@ executable backward-engine
   main-is:             Trade-Engines/backward-engine.hs
   build-depends:       
     base >=4.14 && <4.15,
-    hmatrix >= 0.20.2
+    hmatrix
   default-language:     Haskell2010
   hs-source-dirs:      .
 
