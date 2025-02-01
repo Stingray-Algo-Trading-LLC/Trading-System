@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Lib.LevelsAccel (main) where
 
@@ -72,9 +73,28 @@ generateRightBoundaryPointsVector maskMat =
           -- Otherwise, it is index of the first 1.0.
        in [fromIntegral $ size row, fromIntegral maxIndxInRow] !! valAtMaxIndxOfRow
 
-generateDiffMatrix :: Vector Double -> Vector Double -> Matrix Double
-generateDiffMatrix vecA vecB = asRow vecA - asColumn vecB
+generateColIndxMatrixAcc :: Acc (Matrix Double) -> Acc (Matrix Int)
+generateColIndxMatrixAcc matA = 
+  A.generate (A.shape matA :: Exp DIM2) $ \ix ->
+    let A.Z :. row :. col = unlift ix :: A.Z :. Exp Int :. Exp Int 
+    in A.fromIntegral col :: Exp Int
+    
+generateRightBoundaryPointsVectorAcc :: Acc (Matrix Double) -> Acc (Vector Double)
+generateRightBoundaryPointsVectorAcc maskMat =
 
+  let colsIndxMat = A.enumFromN (A.shape maskMat) 0
+      maskedIndxMat = A.zipWith (\colVal colIndx -> A.cond (colVal A.== 1.0) colIndx -1) maskMat colsIndxMat
+      maxIndxPerRowVec = A.fold1 A.max maskedIndxMat
+
+
+
+generateDiffMatrixAcc :: Acc (Vector Double) -> Acc (Vector Double) -> Acc (Matrix Double)
+generateDiffMatrixAcc vecA vecB = 
+  let rows = A.shape vecA 
+      cols = A.shape vecB
+      matA = A.replicate (A.lift (Z :. All :. cols)) vecA 
+      matB = A.replicate (A.lift (Z :. rows :. All)) vecB
+  in A.zipWith (-) matA matB
 
 -- Upper triangular mask
 generateUpperTriMaskMatrixAcc :: Acc (Matrix Double) -> Acc (Matrix Double)
