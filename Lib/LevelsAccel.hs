@@ -71,11 +71,13 @@ generateRightBoundaryPointsVectorAcc maskMat = fold1 A.min colIndxMaskMat
 
 generateDiffMatrixAcc :: Acc (Vector Double) -> Acc (Vector Double) -> Acc (Matrix Double)
 generateDiffMatrixAcc vecA vecB = 
-  let rows = A.shape vecA 
-      cols = A.shape vecB
-      matA = A.replicate (A.lift (Z :. All :. cols)) vecA 
-      matB = A.replicate (A.lift (Z :. rows :. All)) vecB
+  let 
+    Z :. lenA = unlift (shape vecA) :: Z :. Exp Int
+    Z :. lenB = unlift (shape vecB) :: Z :. Exp Int 
+    matA = A.replicate (lift (Z :. All :. lenB)) vecA
+    matB = A.replicate (lift (Z :. lenA :. All)) vecB
   in A.zipWith (-) matA matB
+
 
 -- Upper triangular mask
 generateUpperTriMaskMatrixAcc :: Acc (Matrix Double) -> Acc (Matrix Double)
