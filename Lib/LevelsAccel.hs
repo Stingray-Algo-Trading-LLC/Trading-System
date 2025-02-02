@@ -50,43 +50,24 @@ generateInBoundsMaskMatrix vecA vecB areValsClose =
     leftBoundaryMaskMat = isMatGT (getDiffFromColsMat $ generateLeftBoundaryPointsVector boundaryMaskMat) (Scalar 0.0) areValsClose
     rightBoundaryMaskMat = isMatLT (getDiffFromColsMat $ generateRightBoundaryPointsVector boundaryMaskMat) (Scalar 0.0) areValsClose
 
-generateLeftBoundaryPointsVector :: Matrix Double -> Vector Double
-generateLeftBoundaryPointsVector maskMat =
-  fromList [findLeftPoint revRow | revRow <- toRows $ fliprl maskMat]
-  where
-    findLeftPoint revRow =
-      let maxIndxInRevRow = maxIndex revRow
-          valAtMaxIndxOfRevRow = floor (atIndex revRow maxIndxInRevRow) -- Either 1 or 0.
-          -- Left boundary point is -1.0 if no boundary points (ie. no 1.0's). Otherwise,
-          -- left boundary point is the index of the last 1.0, hence the formula:
-          -- size revRow - maxIndxInRevRow - 1.
-       in [-1.0, fromIntegral (size revRow - maxIndxInRevRow - 1)] !! valAtMaxIndxOfRevRow
 
-generateRightBoundaryPointsVector :: Matrix Double -> Vector Double
-generateRightBoundaryPointsVector maskMat =
-  fromList [findRightPoint row | row <- toRows maskMat]
-  where
-    findRightPoint row =
-      let maxIndxInRow = maxIndex row
-          valAtMaxIndxOfRow = floor (atIndex row maxIndxInRow) -- Either 1 or 0.
-          -- Right boundary point is row size if no boundary points (ie. no 1.0's).
-          -- Otherwise, it is index of the first 1.0.
-       in [fromIntegral $ size row, fromIntegral maxIndxInRow] !! valAtMaxIndxOfRow
+generateColIndxMaskMatAcc :: Acc (Matrix Double) -> Exp Double -> Acc (Matrix Double)
+generateColIndxMaskMatAcc maskMat defaultVal = 
+  generate (shape maskMat) $ \ix ->
+    let Z :. row :. col = unlift ix :: Z :. Exp Int :. Exp Int
+    in cond ((maskMat ! ix) A.== 1.0) (A.fromIntegral col) (defaultVal)
 
-generateColIndxMatrixAcc :: Acc (Matrix Double) -> Acc (Matrix Int)
-generateColIndxMatrixAcc matA = 
-  A.generate (A.shape matA :: Exp DIM2) $ \ix ->
-    let A.Z :. row :. col = unlift ix :: A.Z :. Exp Int :. Exp Int 
-    in A.fromIntegral col :: Exp Int
+generateLeftBoundaryPointsVectorAcc :: Acc (Matrix Double) -> Acc (Vector Double) 
+generateLeftBoundaryPointsVectorAcc maskMat = fold1 A.max colIndxMaskMat
+  where
+    colIndxMaskMat = generateColIndxMaskMatAcc maskMat (-1.0 :: Exp Double)
+
 
 generateRightBoundaryPointsVectorAcc :: Acc (Matrix Double) -> Acc (Vector Double)
 generateRightBoundaryPointsVectorAcc maskMat = fold1 A.min colIndxMaskMat
   where
     Z :. rows :. cols = unlift (shape maskMat) :: Z :. Exp Int :. Exp Int
-    colIndxMaskMat = 
-      generate (index2 rows cols) $ \ix ->
-        let Z :. row :. col = unlift ix :: Z :. Exp Int :. Exp Int
-        in cond ((maskMat ! ix) A.== 1.0) (A.fromIntegral col) (A.fromIntegral cols)  
+    colIndxMaskMat = generateColIndxMaskMatAcc maskMat $ A.fromIntegral cols
 
 generateDiffMatrixAcc :: Acc (Vector Double) -> Acc (Vector Double) -> Acc (Matrix Double)
 generateDiffMatrixAcc vecA vecB = 
