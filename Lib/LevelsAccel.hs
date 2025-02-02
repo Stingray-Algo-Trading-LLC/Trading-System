@@ -78,15 +78,15 @@ generateColIndxMatrixAcc matA =
   A.generate (A.shape matA :: Exp DIM2) $ \ix ->
     let A.Z :. row :. col = unlift ix :: A.Z :. Exp Int :. Exp Int 
     in A.fromIntegral col :: Exp Int
-    
+
 generateRightBoundaryPointsVectorAcc :: Acc (Matrix Double) -> Acc (Vector Double)
-generateRightBoundaryPointsVectorAcc maskMat =
-
-  let colsIndxMat = A.enumFromN (A.shape maskMat) 0
-      maskedIndxMat = A.zipWith (\colVal colIndx -> A.cond (colVal A.== 1.0) colIndx -1) maskMat colsIndxMat
-      maxIndxPerRowVec = A.fold1 A.max maskedIndxMat
-
-
+generateRightBoundaryPointsVectorAcc maskMat = fold1 A.min colIndxMaskMat
+  where
+    Z :. rows :. cols = unlift (shape maskMat) :: Z :. Exp Int :. Exp Int
+    colIndxMaskMat = 
+      generate (index2 rows cols) $ \ix ->
+        let Z :. row :. col = unlift ix :: Z :. Exp Int :. Exp Int
+        in cond ((maskMat ! ix) A.== 1.0) (A.fromIntegral col) (A.fromIntegral cols)  
 
 generateDiffMatrixAcc :: Acc (Vector Double) -> Acc (Vector Double) -> Acc (Matrix Double)
 generateDiffMatrixAcc vecA vecB = 

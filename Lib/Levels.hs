@@ -1,10 +1,11 @@
-
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE FlexibleContexts #-}
 
 module Lib.Levels (resistanceLevels) where
 
 import Numeric.LinearAlgebra
 import GHC.Real (fromIntegral)
+
 
 --------------------------------------------------------------------------------
 -- Functions to Compute Resistance Levels
