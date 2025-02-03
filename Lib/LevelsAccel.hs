@@ -1,55 +1,50 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module Lib.LevelsAccel (main) where
+module Lib.LevelsAccel (resistanceLevelsAcc) where
 
 import Data.Array.Accelerate as A
 import Data.Array.Accelerate.LLVM.PTX as GPU -- or .LLVM.Native for CPU backend
 
 
-resistanceLevelsX :: Acc (Vector Double) -> Acc (Vector Double) -> Acc (Scalar Double) -> Acc (Scalar Double) -> Acc (Scalar Double) -> Acc (Scalar Double) -> Acc (Scalar Double) -> Acc (Vector Double)
-resistanceLevelsX barTopsVec barHighVec pillarThresh lowerBound upperBound rtol atol =
-
-
-main :: IO ()
-main = do 
-    print "Hello from LevelsAccel.hs"
-
-    --------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 -- Functions to Compute Resistance Levels
 --------------------------------------------------------------------------------
-resistanceLevels :: Vector Double -> Vector Double -> Double -> Double -> Double -> Double -> Double -> Vector Double
-resistanceLevels barTopsVec barHighVec pillarThresh lowerBound upperBound rtol atol =
-  fromList (filter (> 0.0) (toList qualifyingLevelsMaskVec))
-  where
-    areValsClose = isClose rtol atol
-    proximityMaskMat = generateProximityMaskMatrix barHighVec barHighVec lowerBound upperBound areValsClose
-    inBoundsMaskMat = generateInBoundsMaskMatrix barTopsVec barHighVec areValsClose
-    pillarMaskMat = andMat proximityMaskMat inBoundsMaskMat
-    qualifyingLevelsMaskVec =
-      fromList (map (\row -> if sumElements row >= pillarThresh then 1.0 else 0.0) (toRows pillarMaskMat))
-        * barHighVec
 
-generateProximityMaskMatrix :: Vector Double -> Vector Double -> Double -> Double -> (Double -> Double -> Double) -> Matrix Double
-generateProximityMaskMatrix vecA vecB lowerBound upperBound areValsClose =
-  andMat lowerProximityMaskMatrix upperProximityMaskMatrix
+
+resistanceLevelsAcc :: Acc (Vector Double) -> Acc (Vector Double) -> Exp Double -> Exp Double -> Exp Double -> Exp Double -> Exp Double -> Acc (Vector Double)
+resistanceLevelsAcc barTopsVec barHighVec pillarThresh lowerBound upperBound rtol atol =
+  A.filter (A.> 0.0) qualifyingLevelsMaskVec
   where
-    distanceMatrix = generateDiffMatrix vecA vecB
-    areDistsGTELowerBoundOr = isMatGTE distanceMatrix (Scalar lowerBound)
-    areDistsLTEUpperBoundOr = isMatLTE distanceMatrix (Scalar upperBound)
+    areValsClose = isClose rtol atol 
+    proximityMaskMat = generateProximityMaskMatrixAcc barHighVec barHighVec lowerBound upperBound areValsClose
+    inBoundsMaskMat = generateInBoundsMaskMatrixAcc barTopsVec barHighVec areValsClose
+    pillarMaskMat = andMatAcc proximityMaskMat inBoundsMaskMat
+    pillarSumVec = A.fold (+) 0.0 pillarMaskMat
+    qualifyingLevelsMaskVec = A.zipWith (\barHigh pillarSum -> cond (pillarSumn A.>= pillarThresh) barHighVec 0.0) barHighVec pillarSumVec
+
+
+generateProximityMaskMatrixAcc :: Acc (Vector Double) -> Acc (Vector Double) -> Exp Double -> Exp Double -> (Exp Double -> Exp Double -> Exp Double) -> Acc (Matrix Double)
+generateProximityMaskMatrixAcc vecA vecB lowerBound upperBound areValsClose =
+  andMatAcc lowerProximityMaskMatrix upperProximityMaskMatrix
+  where 
+    distanceMatrix = generateDiffMatrixAcc vecA vecB
+    areDistsGTELowerBoundOr = isMatGTEAcc distanceMatrix lowerBound
+    areDistsLTEUpperBoundOr = isMatLTEAcc distanceMatrix upperBound
     lowerProximityMaskMatrix = areDistsGTELowerBoundOr areValsClose
-    upperProximityMaskMatrix = areDistsLTEUpperBoundOr areValsClose
+    upperProximityMaskMatrix = areDistsLTEUpperBoundOr areValsClose 
 
-generateInBoundsMaskMatrix :: Vector Double -> Vector Double -> (Double -> Double -> Double) -> Matrix Double
-generateInBoundsMaskMatrix vecA vecB areValsClose =
-  andMat leftBoundaryMaskMat rightBoundaryMaskMat
-  where
-    boundaryMaskMat = isMatGT (generateDiffMatrix vecA vecB) (Scalar 0.0) areValsClose
-    cols = fromList [0.0 .. fromIntegral (size vecB - 1)]
-    getDiffFromColsMat = generateDiffMatrix cols
-    leftBoundaryMaskMat = isMatGT (getDiffFromColsMat $ generateLeftBoundaryPointsVector boundaryMaskMat) (Scalar 0.0) areValsClose
-    rightBoundaryMaskMat = isMatLT (getDiffFromColsMat $ generateRightBoundaryPointsVector boundaryMaskMat) (Scalar 0.0) areValsClose
 
+generateInBoundsMaskMatrixAcc :: Acc (Vector Double) -> Acc (Vector Double) -> (Exp Double -> Exp Double -> Exp Double) -> Acc (Matrix Double)
+generateInBoundsMaskMatrixAcc vecA vecB areValsClose = 
+  let
+    boundaryMaskMat = isMatGTAcc (generateDiffMatrixAcc vecA vecB) (0.0 :: Exp Double) areValsClose
+    leftBoundaryPointsVec = generateLeftBoundaryPointsVectorAcc boundaryMaskMat
+    rightBoundaryPointsVec = generateRightBoundaryPointsVectorAcc boundaryMaskMat
+  in
+    generate (shape boundaryMaskMat) $ \ix ->
+      let Z :. row :. col = unlift ix :: Z :. Exp Int :. Exp Int 
+      in cond ((col A.> (leftBoundaryPointsVec ! (index1 row))) A.&& (col A.< (rightBoundaryPointsVec ! (index1 row)))) 1.0 0.0
 
 generateColIndxMaskMatAcc :: Acc (Matrix Double) -> Exp Double -> Acc (Matrix Double)
 generateColIndxMaskMatAcc maskMat defaultVal = 
