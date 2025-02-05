@@ -39,13 +39,14 @@ generateInBoundsMaskMatrix vecA vecB areValsClose =
     boundaryMaskMat = isMatGT (generateDiffMatrix vecA vecB) (Scalar 0.0) areValsClose
     cols = fromList [0.0 .. fromIntegral (size vecB - 1)]
     getDiffFromColsMat = generateDiffMatrix cols
-    leftBoundaryMaskMat = isMatGT (getDiffFromColsMat $ generateLeftBoundaryPointsVector boundaryMaskMat) (Scalar 0.0) areValsClose
+    leftBoundaryMaskMat = isMatGT (getDiffFromColsMat $ generateLeftBoundaryPointsVector $ boundaryMaskMat) (Scalar 0.0) areValsClose
     rightBoundaryMaskMat = isMatLT (getDiffFromColsMat $ generateRightBoundaryPointsVector boundaryMaskMat) (Scalar 0.0) areValsClose
 
 generateLeftBoundaryPointsVector :: Matrix Double -> Vector Double
 generateLeftBoundaryPointsVector maskMat =
-  fromList [findLeftPoint revRow | revRow <- toRows $ fliprl maskMat]
+  fromList [findLeftPoint revRow | revRow <- toRows $ fliprl leftMaskMat]
   where
+    leftMaskMat = generateLeftMaskMatrix maskMat
     findLeftPoint revRow =
       let maxIndxInRevRow = maxIndex revRow
           valAtMaxIndxOfRevRow = floor (atIndex revRow maxIndxInRevRow) -- Either 1 or 0.
@@ -56,8 +57,9 @@ generateLeftBoundaryPointsVector maskMat =
 
 generateRightBoundaryPointsVector :: Matrix Double -> Vector Double
 generateRightBoundaryPointsVector maskMat =
-  fromList [findRightPoint row | row <- toRows maskMat]
+  fromList [findRightPoint row | row <- toRows rightMaskMat]
   where
+    rightMaskMat = generateRightMaskMatrix maskMat
     findRightPoint row =
       let maxIndxInRow = maxIndex row
           valAtMaxIndxOfRow = floor (atIndex row maxIndxInRow) -- Either 1 or 0.
