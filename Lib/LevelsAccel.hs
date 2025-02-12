@@ -70,8 +70,8 @@ generateDiffMatrixAcc vecA vecB =
   let 
     Z :. lenA = A.unlift (A.shape vecA) :: Z :. Exp Int
     Z :. lenB = A.unlift (A.shape vecB) :: Z :. Exp Int 
-    matA = A.replicate (A.lift (Z :. All :. lenB)) vecA
-    matB = A.replicate (A.lift (Z :. lenA :. All)) vecB
+    matA = A.replicate (A.lift (Z :. lenB :. All)) vecA
+    matB = A.replicate (A.lift (Z :. All :. lenA)) vecB
   in A.zipWith (A.-) matA matB
 
 
