@@ -143,8 +143,8 @@ main = do
   ---------------------------------------
   -- Here we compile a “runN” version that can be reused.
   let resistanceLevelsGPU :: A.Vector Double -> A.Vector Double -> A.Vector Double
-      resistanceLevelsGPU = $(GPU.runQ $ \barTops barHighs -> 
-        resistanceLevelsAcc barTops barHighs (constant 0.5) (constant 1.0) (constant 100.0) (constant 1e-3) (constant 1e-6))
+      resistanceLevelsGPU = GPU.runN $ \barTops barHighs -> 
+        resistanceLevelsAcc barTops barHighs (constant 0.5) (constant 1.0) (constant 100.0) (constant 1e-3) (constant 1e-6)
 
   (gpuResult400, gpuTime400) <- timeIt $ evaluate $ resistanceLevelsGPU barTopsAcc400 barHighsAcc400
 
