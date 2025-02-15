@@ -36,16 +36,22 @@ timeIt ioAction = do
 -- 1. Create or load inputs
 -----------------------------
 barTopsList400 :: [Double]
-barTopsList400  = [1.0 .. 400]
+barTopsList400  = [500.00, 502.00 .. 1300.0]
 
 barHighsList400 :: [Double]
-barHighsList400 = [101.0 .. 500]
+barHighsList400 = [11.0, 14.0 .. 1211.0]
 
 barTopsList6000 :: [Double]
-barTopsList6000  = [1.0 .. 6000]
+barTopsList6000  = [2.0, 4.0 .. 12002.0]
 
 barHighsList6000 :: [Double]
-barHighsList6000 = [101.0 .. 6100]
+barHighsList6000 = [10.0, 20.0 .. 60010.0]
+
+barTopsList100 :: [Double]
+barTopsList100  = [5.0, 10.0 .. 505.0]
+
+barHighsList100 :: [Double]
+barHighsList100 = [1.0 .. 101.0]
 
 pillarThresh :: Double
 pillarThresh = 0.5
@@ -90,9 +96,18 @@ main = do
   let barTopsAcc6000  = A.fromList (Z :. Prelude.length barTopsList6000)  barTopsList6000 :: A.Vector Double
       barHighsAcc6000 = A.fromList (Z :. Prelude.length barHighsList6000) barHighsList6000 :: A.Vector Double
 
+  -- hmatrix Vectors:
+  let barTopsVec100  = H.fromList barTopsList100
+      barHighsVec100 = H.fromList barHighsList100
+
+  -- Accelerate Arrays:
+  -- Note: fromList (Z :. length) is for Accelerate. 
+  let barTopsAcc100  = A.fromList (Z :. Prelude.length barTopsList100)  barTopsList100 :: A.Vector Double
+      barHighsAcc100 = A.fromList (Z :. Prelude.length barHighsList100) barHighsList100 :: A.Vector Double
   ---------------------------------------
   -- 2. Time the “CPU/hmatrix” function
   ---------------------------------------
+
   (cpuResult400, cpuTime400) <- timeIt $ evaluate $
     resistanceLevels
       barTopsVec400
@@ -113,6 +128,16 @@ main = do
       rtol
       atol
 
+  (cpuResult100, cpuTime100) <- timeIt $ evaluate $
+    resistanceLevels
+      barTopsVec100
+      barHighsVec100
+      pillarThresh
+      lowerBound
+      upperBound
+      rtol
+      atol
+
   ---------------------------------------
   -- 3. Time the Accelerate version
   ---------------------------------------
@@ -120,10 +145,15 @@ main = do
   let resistanceLevelsGPU :: A.Vector Double -> A.Vector Double -> A.Vector Double
       resistanceLevelsGPU = $(GPU.runQ $ \barTops barHighs -> 
         resistanceLevelsAcc barTops barHighs (constant 0.5) (constant 1.0) (constant 100.0) (constant 1e-3) (constant 1e-6))
-  
+
   (gpuResult400, gpuTime400) <- timeIt $ evaluate $ resistanceLevelsGPU barTopsAcc400 barHighsAcc400
-  
+
   (gpuResult6000, gpuTime6000) <- timeIt $ evaluate $ resistanceLevelsGPU barTopsAcc6000 barHighsAcc6000
+
+  (gpuResult100, gpuTime100) <- timeIt $ evaluate $ resistanceLevelsGPU barTopsAcc100 barHighsAcc100
+  
+  
+  
    
   -----------------------------
   -- 4. Print or inspect times
@@ -134,9 +164,12 @@ main = do
   printf "\nCPU6000 version time = %f seconds\n" cpuTime6000
   printf "GPU6000   version time = %f seconds\n" gpuTime6000
 
+  printf "\nCPU100 version time = %f seconds\n" cpuTime100
+  printf "GPU100   version time = %f seconds\n" gpuTime100
 
   -- If you want to see that the results are the same (within some tolerance):
   -- putStrLn $ "CPU   result: " Prelude.++ show cpuResult
   -- putStrLn $ "Accel result: " Prelude.++ show (A.toList gpuResult)
-  putStrLn $ "CPU400 Equal GPU400? " Prelude.++ show (H.toList cpuResult400 Prelude.== A.toList gpuResult400)
+  putStrLn $ "\nCPU400 Equal GPU400? " Prelude.++ show (H.toList cpuResult400 Prelude.== A.toList gpuResult400)
   putStrLn $ "CPU6000 Equal GPU6000? " Prelude.++ show (H.toList cpuResult6000 Prelude.== A.toList gpuResult6000)
+  putStrLn $ "CPU100 Equal GPU100? " Prelude.++ show (H.toList cpuResult100 Prelude.== A.toList gpuResult100)
