@@ -10,6 +10,7 @@ import Data.Ord (Ord (max, min))
 import Lib.DataTypes (Bar (..), StreamData (..), Trade (..))
 import Lib.Utils (getSaleCondition, utcToUnixSeconds)
 import Numeric.LinearAlgebra
+import Data.List (sort)
 
 data LVRHStateParam
   = LVRHStateParam
@@ -20,9 +21,10 @@ data LVRHStateParam
     openTime :: Double, -- The Unix timestamp of the last trade to update openPrice.
     firstTime :: Double, -- The Unix timestamp of the earliest trade received, condition code is irrelevant.
     lastTime :: Double, -- The Unix timestamp of the last trade to update lastPrice.
-    barTops :: Vector Double, -- Sequence of bar top prices. Open/Close price for Red/Green bars.
-    barHighs :: Vector Double, -- Sequence of bar high prices.
-    resLines :: Vector Double -- Resistance price levels.
+    barTops :: [Double], -- Sequence of bar top prices. Open/Close price for Red/Green bars.
+    barHighs :: [Double], -- Sequence of bar high prices.
+    resLevels :: [Double], -- Resistance price levels.
+    genResLevels :: [Double] -> [Double] -> [Double]
   }
   deriving (Show)
 
@@ -61,12 +63,24 @@ lvrhStateTransition stateParams (BarData bar) =
         lastTime = -(1 / 0), -- -infinity
         barTops = newBarTops,
         barHighs = newBarHighs,
-        resLines = newBarHighs -- getResLines newBarTops newBarHighs
+        resLevels = newResLevels -- getResLevels newBarTops newBarHighs
       }
   where
-    newBarTops = vjoin [barTops stateParams, fromList [max (open bar) (close bar)]]
-    newBarHighs = vjoin [barHighs stateParams, fromList [high bar]]
-
+    newBarTops = barTops stateParams ++ [max (open bar) (close bar)]
+    newBarHighs = barHighs stateParams ++ [high bar]
+    newResLevels = sort $ (genResLevels stateParams) newBarHighs newBarHighs
 lvrhBuyLogic :: LVRHStateParam -> StreamData -> Bool
-lvrhBuyLogic stateParams (TradeData trade) = True
+lvrhBuyLogic stateParams (TradeData trade) = 
+  lastTime stateParams - firstTime stateParams > 0.5 &&    -- Wait time to ensure open price is accurate.
+  lastPrice stateParams > openPrice stateParams + 0.05 &&  -- Bar body length.
+  lastPrice stateParams == highPrice stateParams &&        -- Last price is highest point of bar.
+  openPrice stateParams - lowPrice stateParams >= 0.15 &&  -- Bottom Wick length.
+  inDeflectionZone (lowPrice stateParams) (resLevels stateParams) (lastPrice stateParams) 0.02 -- Wick "touches" or is near resistance level.
 lvrhBuyLogic stateParams (BarData bar) = False
+
+inDeflectionZone :: Double -> [Double] -> Double -> Double -> Bool
+inDeflectionZone point resLevels lastPrice tolerance = 
+  let sortedResLevels =  sort resLevels
+  in case (length $ takeWhile (<=lastPrice) (sortedResLevels)) - 1 of
+    -1 -> False
+    i -> abs (point - sortedResLevels !! i) <= tolerance
