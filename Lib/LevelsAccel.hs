@@ -10,6 +10,15 @@ import Data.Array.Accelerate.LLVM.PTX as GPU -- or .LLVM.Native for CPU backend
 --------------------------------------------------------------------------------
 -- Functions to Compute Resistance Levels
 --------------------------------------------------------------------------------
+initResistanceLevelsAcc :: Double -> Double -> Double -> Double -> [Double] -> [Double] -> [Double]
+initResistanceLevelsAcc pillarThresh tolerance rtol atol vertAsympsArr pointsArr =
+  toList $ genResLevelsAcc vertAsympsVec pointsVec
+  where
+    vertAsympsVec = fromList (Z :. Prelude.length vertAsympsArr) vertAsympsArr :: Vector Double
+    pointsVec = fromList (Z :. Prelude.length pointsArr) pointsArr :: Vector Double
+    genResLevelsAcc = GPU.runN $ \vaVec pVec -> 
+        generateResistanceLevelsAcc 
+          vaVec pVec (constant pillarThresh) (constant tolerance) (constant rtol) (constant atol)
 
 generateResistanceLevelsAcc :: Acc (Vector Double) -> Acc (Vector Double) -> Exp Double -> Exp Double -> Exp Double -> Exp Double -> Acc (Vector Double)
 generateResistanceLevelsAcc verticalAsymptotesVec pointsVec pillarThresh tolerance rtol atol =

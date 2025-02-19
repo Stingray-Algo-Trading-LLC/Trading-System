@@ -10,6 +10,16 @@ import GHC.Real (fromIntegral)
 --------------------------------------------------------------------------------
 -- Functions to Compute Resistance Levels
 --------------------------------------------------------------------------------
+
+initResistanceLevels :: Double -> Double -> Double -> Double -> [Double] -> [Double] -> [Double]
+initResistanceLevels pillarThresh tolerance rtol atol vertAsympsArr pointsArr =
+  toList $ genResLevels vertAsympsVec pointsVec
+  where
+    vertAsympsVec = fromList vertAsympsArr :: Vector Double
+    pointsVec = fromList pointsArr :: Vector Double
+    genResLevels = \vaVec pVec -> generateResistanceLevels 
+      vaVec pVec pillarThresh tolerance rtol atol
+
 generateResistanceLevels :: Vector Double -> Vector Double -> Double -> Double -> Double -> Double -> Vector Double
 generateResistanceLevels verticalAsymptotesVec pointsVec pillarThresh tolerance rtol atol =
   fromList (filter (> 0.0) (toList qualifyingLevelsMaskVec))
