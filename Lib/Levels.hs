@@ -1,7 +1,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module Lib.Levels (resistanceLevels) where
+module Lib.Levels (generateResistanceLevels) where
 
 import Numeric.LinearAlgebra
 import GHC.Real (fromIntegral)
@@ -10,25 +10,25 @@ import GHC.Real (fromIntegral)
 --------------------------------------------------------------------------------
 -- Functions to Compute Resistance Levels
 --------------------------------------------------------------------------------
-resistanceLevels :: Vector Double -> Vector Double -> Double -> Double -> Double -> Double -> Double -> Vector Double
-resistanceLevels barTopsVec barHighVec pillarThresh lowerBound upperBound rtol atol =
+generateResistanceLevels :: Vector Double -> Vector Double -> Double -> Double -> Double -> Double -> Vector Double
+generateResistanceLevels verticalAsymptotesVec pointsVec pillarThresh tolerance rtol atol =
   fromList (filter (> 0.0) (toList qualifyingLevelsMaskVec))
   where
     areValsClose = isClose rtol atol
-    proximityMaskMat = generateProximityMaskMatrix barHighVec barHighVec lowerBound upperBound areValsClose
-    inBoundsMaskMat = generateInBoundsMaskMatrix barTopsVec barHighVec areValsClose
+    proximityMaskMat = generateProximityMaskMatrix pointsVec pointsVec tolerance areValsClose
+    inBoundsMaskMat = generateInBoundsMaskMatrix verticalAsymptotesVec pointsVec areValsClose
     pillarMaskMat = andMat proximityMaskMat inBoundsMaskMat
     qualifyingLevelsMaskVec =
       fromList (map (\row -> if sumElements row >= pillarThresh then 1.0 else 0.0) (toRows pillarMaskMat))
-        * barHighVec
+        * pointsVec
 
-generateProximityMaskMatrix :: Vector Double -> Vector Double -> Double -> Double -> (Double -> Double -> Double) -> Matrix Double
-generateProximityMaskMatrix vecA vecB lowerBound upperBound areValsClose =
+generateProximityMaskMatrix :: Vector Double -> Vector Double -> Double -> (Double -> Double -> Double) -> Matrix Double
+generateProximityMaskMatrix vecA vecB tolerance areValsClose =
   andMat lowerProximityMaskMatrix upperProximityMaskMatrix
   where
     distanceMatrix = generateDiffMatrix vecA vecB
-    areDistsGTELowerBoundOr = isMatGTE distanceMatrix (Scalar lowerBound)
-    areDistsLTEUpperBoundOr = isMatLTE distanceMatrix (Scalar upperBound)
+    areDistsGTELowerBoundOr = isMatGTE distanceMatrix (Scalar tolerance)
+    areDistsLTEUpperBoundOr = isMatLTE distanceMatrix (Scalar 0.0)
     lowerProximityMaskMatrix = areDistsGTELowerBoundOr areValsClose
     upperProximityMaskMatrix = areDistsLTEUpperBoundOr areValsClose
 

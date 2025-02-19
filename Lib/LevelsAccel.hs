@@ -1,7 +1,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module Lib.LevelsAccel (resistanceLevelsAcc) where
+module Lib.LevelsAccel (generateResistanceLevelsAcc) where
 
 import Data.Array.Accelerate as A
 import Data.Array.Accelerate.LLVM.PTX as GPU -- or .LLVM.Native for CPU backend
@@ -11,25 +11,25 @@ import Data.Array.Accelerate.LLVM.PTX as GPU -- or .LLVM.Native for CPU backend
 -- Functions to Compute Resistance Levels
 --------------------------------------------------------------------------------
 
-resistanceLevelsAcc :: Acc (Vector Double) -> Acc (Vector Double) -> Exp Double -> Exp Double -> Exp Double -> Exp Double -> Exp Double -> Acc (Vector Double)
-resistanceLevelsAcc barTopsVec barHighVec pillarThresh lowerBound upperBound rtol atol =
+generateResistanceLevelsAcc :: Acc (Vector Double) -> Acc (Vector Double) -> Exp Double -> Exp Double -> Exp Double -> Exp Double -> Acc (Vector Double)
+generateResistanceLevelsAcc verticalAsymptotesVec pointsVec pillarThresh tolerance rtol atol =
   A.afst (A.filter (A.> 0.0) qualifyingLevelsMaskVec)
   where
     areValsClose = isCloseAcc rtol atol 
-    proximityMaskMat = generateProximityMaskMatrixAcc barHighVec barHighVec lowerBound upperBound areValsClose
-    inBoundsMaskMat = generateInBoundsMaskMatrixAcc barTopsVec barHighVec areValsClose
+    proximityMaskMat = generateProximityMaskMatrixAcc pointsVec pointsVec tolerance areValsClose
+    inBoundsMaskMat = generateInBoundsMaskMatrixAcc verticalAsymptotesVec pointsVec areValsClose
     pillarMaskMat = andMatAcc proximityMaskMat inBoundsMaskMat
     pillarSumVec = A.fold (A.+) 0.0 pillarMaskMat
-    qualifyingLevelsMaskVec = A.zipWith (\barHigh pillarSum -> A.cond (pillarSum A.>= pillarThresh) barHigh 0.0) barHighVec pillarSumVec
+    qualifyingLevelsMaskVec = A.zipWith (\barHigh pillarSum -> A.cond (pillarSum A.>= pillarThresh) barHigh 0.0) pointsVec pillarSumVec
 
 
-generateProximityMaskMatrixAcc :: Acc (Vector Double) -> Acc (Vector Double) -> Exp Double -> Exp Double -> (Exp Double -> Exp Double -> Exp Double) -> Acc (Matrix Double)
-generateProximityMaskMatrixAcc vecA vecB lowerBound upperBound areValsClose =
+generateProximityMaskMatrixAcc :: Acc (Vector Double) -> Acc (Vector Double) -> Exp Double -> (Exp Double -> Exp Double -> Exp Double) -> Acc (Matrix Double)
+generateProximityMaskMatrixAcc vecA vecB tolerance areValsClose =
   andMatAcc lowerProximityMaskMatrix upperProximityMaskMatrix
   where 
     distanceMatrix = generateDiffMatrixAcc vecA vecB
-    areDistsGTELowerBoundOr = isMatGTEAcc distanceMatrix lowerBound
-    areDistsLTEUpperBoundOr = isMatLTEAcc distanceMatrix upperBound
+    areDistsGTELowerBoundOr = isMatGTEAcc distanceMatrix tolerance
+    areDistsLTEUpperBoundOr = isMatLTEAcc distanceMatrix (0.0 :: Exp Double)
     lowerProximityMaskMatrix = areDistsGTELowerBoundOr areValsClose
     upperProximityMaskMatrix = areDistsLTEUpperBoundOr areValsClose 
 
