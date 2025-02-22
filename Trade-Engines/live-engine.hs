@@ -73,18 +73,18 @@ stateTransition (BarData bar) (BRHState brhF) = BRHState (brhF (BarData bar) brh
 -- We can do something like the following. This avoids calling brh_stateTransition, which in turn would generate a  new brh_state --
 stateTransition (TradeData trade) (BRHState brhF) = BRHState brhF
 
-buyLogic :: StreamData -> AlgoState -> Bool
-buyLogic streamData (LVRHState lvrhF) = lvrhF streamData lvrhBuyLogic
-buyLogic streamData (BRHState brhF) = brhF streamData brhBuyLogic
+buyLogic :: StreamData -> AlgoState -> Bool -> Bool
+buyLogic streamData (LVRHState lvrhF) buyState = lvrhF streamData (lvrhBuyLogic buyState)
+buyLogic streamData (BRHState brhF) buyState = brhF streamData (brhBuyLogic buyState)
 
 getNewState :: [AlgoState] -> (StreamData -> [AlgoState])
 getNewState algoStatesF streamData = map (stateTransition streamData) algoStatesF
 
-getBuyOrder :: [AlgoState] -> (StreamData -> [Bool])
-getBuyOrder algoStatesF streamData = map (buyLogic streamData) algoStatesF
+getNewBuyState :: [AlgoState] -> [Bool] -> (StreamData -> [Bool])
+getNewBuyState algoStatesF buyStates streamData = zipWith (buyLogic streamData) algoStatesF buyStates
 
-readLoop :: Connection -> [AlgoState] -> IO ()
-readLoop conn state = do
+readLoop :: Connection -> [AlgoState] -> [Bool] -> IO ()
+readLoop conn state buyState = do
   -- rawMsg <- receiveData conn
   let rawMsg = BL.pack $ "[{\"T\":\"t\",\"i\":96921,\"S\":\"AAPL\",\"x\":\"D\",\"p\":126.55,\"s\":1,\"t\":\"2021-02-22T15:51:44.208Z\",\"c\":[\"@\",\"I\"],\"z\":\"C\"}]"
   case eitherDecode rawMsg :: Either String [StreamData] of
@@ -92,16 +92,16 @@ readLoop conn state = do
       mapM_
         ( \message -> do
             let newState = getNewState state message
-            let buyOrder = getBuyOrder newState message
+            let newBuyState = getNewBuyState newState buyState message
             handleMessage message
-            putStrLn $ "Buy orders: " ++ show buyOrder
-            readLoop conn newState
+            putStrLn $ "Buy orders: " ++ show newBuyState
+            readLoop conn newState newBuyState
         )
         messages
     Left err -> do
       putStrLn $ "Could not parse message: " ++ err
 
-      readLoop conn state
+      readLoop conn state buyState
 
 --------------------------------------------------------------------------------
 -- Main
@@ -160,7 +160,7 @@ main = do
                   lastTime = 0.0
                 }
 
-        readLoop conn [LVRHState $ lvrhState lvrhInitParams, BRHState $ brhState brhInitParams]
+        readLoop conn [LVRHState $ lvrhState lvrhInitParams, BRHState $ brhState brhInitParams] [False, False]
     _ -> do
       putStrLn "ERROR: Missing environment variables."
       putStrLn "Please set ALPACA_API_KEY and ALPACA_API_SECRET."

@@ -69,14 +69,15 @@ lvrhStateTransition stateParams (BarData bar) =
     newBarTops = barTops stateParams ++ [max (open bar) (close bar)]
     newBarHighs = barHighs stateParams ++ [high bar]
     newResLevels = sort $ (genResLevels stateParams) newBarHighs newBarHighs
-lvrhBuyLogic :: LVRHStateParam -> StreamData -> Bool
-lvrhBuyLogic stateParams (TradeData trade) = 
+lvrhBuyLogic :: Bool -> LVRHStateParam -> StreamData -> Bool
+lvrhBuyLogic buyStateParams stateParams (TradeData trade) = 
+  not buyStateParams &&
   lastTime stateParams - firstTime stateParams > 0.5 &&    -- Wait time to ensure open price is accurate.
   lastPrice stateParams > openPrice stateParams + 0.05 &&  -- Bar body length.
   lastPrice stateParams == highPrice stateParams &&        -- Last price is highest point of bar.
   openPrice stateParams - lowPrice stateParams >= 0.15 &&  -- Bottom Wick length.
   inDeflectionZone (lowPrice stateParams) (resLevels stateParams) (lastPrice stateParams) 0.02 -- Wick "touches" or is near resistance level.
-lvrhBuyLogic stateParams (BarData bar) = False
+lvrhBuyLogic buyStateParams stateParams (BarData bar) = False
 
 inDeflectionZone :: Double -> [Double] -> Double -> Double -> Bool
 inDeflectionZone point resLevels lastPrice tolerance = 

@@ -26,6 +26,6 @@ brhStateTransition :: BRHStateParam -> StreamData -> (StreamData -> (BRHStatePar
 brhStateTransition stateParam (TradeData trade) = brhState $ stateParam {openPrice = 10.0}
 brhStateTransition stateParam (BarData bar) = brhState $ stateParam {lastPrice = 1.0}
 
-brhBuyLogic :: BRHStateParam -> StreamData -> Bool
-brhBuyLogic stateParam (TradeData trade) = False
-brhBuyLogic stateParam (BarData bar) = True
+brhBuyLogic :: Bool -> BRHStateParam -> StreamData -> Bool
+brhBuyLogic buyStateParams stateParam (TradeData trade) = False
+brhBuyLogic buyStateParams stateParam (BarData bar) = True

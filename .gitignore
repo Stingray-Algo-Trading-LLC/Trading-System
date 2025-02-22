@@ -34,3 +34,6 @@ cabal.project.local~
 *.swp
 .vscode/
 .DS_Store
+
+playground.hs 
+play
