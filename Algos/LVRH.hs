@@ -80,8 +80,7 @@ lvrhBuyLogic buyStateParams stateParams (TradeData trade) =
 lvrhBuyLogic buyStateParams stateParams (BarData bar) = False
 
 inDeflectionZone :: Double -> [Double] -> Double -> Double -> Bool
-inDeflectionZone point resLevels lastPrice tolerance = 
-  let sortedResLevels =  sort resLevels
-  in case (length $ takeWhile (<=lastPrice) (sortedResLevels)) - 1 of
+inDeflectionZone point sortedResLevels lastPrice tolerance = 
+  case (length $ takeWhile (<=lastPrice) (sortedResLevels)) - 1 of
     -1 -> False
     i -> abs (point - sortedResLevels !! i) <= tolerance
