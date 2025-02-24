@@ -5,8 +5,8 @@
 
 module Main where
 
-import Algos.BRH (BRHStateParam (..), brhBuyLogic, brhState, brhStateTransition)
-import Algos.LVRH (LVRHStateParam (..), lvrhBuyLogic, lvrhState, lvrhStateTransition)
+import Algos.BRH (initBRH, BRHState, brhBuyLogic, brhStateTransition)
+import Algos.LVRH (initLVRH, LVRHState, lvrhBuyLogic, lvrhStateTransition)
 import Data.Aeson (Value, eitherDecode, encode, object, (.:), (.=))
 import Data.ByteString.Lazy.Char8 (unpack)
 import Data.ByteString.Lazy.Char8 qualified as BL
@@ -63,8 +63,8 @@ handleMessage (BarData bar) = putStrLn $ "Received Bar: " ++ show bar
 handleMessage (BarUpdateData bar) = putStrLn $ "Received Bar Update: " ++ show bar
 
 data AlgoState
-  = LVRHState (forall y. StreamData -> (LVRHStateParam -> StreamData -> y) -> y)
-  | BRHState (forall y. StreamData -> (BRHStateParam -> StreamData -> y) -> y)
+  = LVRHState 
+  | BRHState
 
 stateTransition :: StreamData -> AlgoState -> AlgoState
 stateTransition streamData (LVRHState lvrhF) = LVRHState (lvrhF streamData lvrhStateTransition) -- pattern match this branch for Data -> (Data -> Int -> Int -> Int -> Int -> y) -> y --
@@ -137,30 +137,13 @@ main = do
 
         -- 5. Start reading messages in a loop
         putStrLn "Entering readLoop..."
+        
+        readLoop conn 
+          [
+            initLVRH 4.0 (-0.04) 0.5 0.01 0.15 0.02 0.5 1e-9 1e-12, 
+            initBRH 4.0 (-0.04) 0.5 0.01 0.15 0.02 1e-9 1e-12
+          ] [False, False]
 
-        let lvrhInitParams =
-              LVRHStateParam
-                { openPrice = 0.0,
-                  highPrice = 0.0,
-                  lowPrice = 0.0,
-                  lastPrice = 0.0,
-                  openTime = 0.0,
-                  firstTime = 0.0,
-                  lastTime = 0.0
-                }
-
-        let brhInitParams =
-              BRHStateParam
-                { openPrice = 0.0,
-                  highPrice = 0.0,
-                  lowPrice = 0.0,
-                  lastPrice = 0.0,
-                  openTime = 0.0,
-                  firstTime = 0.0,
-                  lastTime = 0.0
-                }
-
-        readLoop conn [LVRHState $ lvrhState lvrhInitParams, BRHState $ brhState brhInitParams] [False, False]
     _ -> do
       putStrLn "ERROR: Missing environment variables."
       putStrLn "Please set ALPACA_API_KEY and ALPACA_API_SECRET."

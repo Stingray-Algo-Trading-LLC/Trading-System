@@ -1,16 +1,20 @@
 module Algos.LVRH
-  ( lvrhState,
-    lvrhBuyLogic,
+  ( lvrhBuyLogic,
     lvrhStateTransition,
-    LVRHStateParam (..),
+    LVRHState,
+    initLVRH
   )
 where
 
 import Data.Ord (Ord (max, min))
 import Lib.DataTypes (Bar (..), StreamData (..), Trade (..))
 import Lib.Utils (getSaleCondition, utcToUnixSeconds)
-import Numeric.LinearAlgebra
+import Lib.Hammer (isGreenHammer, isHammerInResDeflectZone)
+import Lib.LevelsAccel (initResistanceLevelsAcc)
+import Lib.Levels (resistanceLevels)
 import Data.List (sort)
+
+data LVRHState = LVRHState (forall y. StreamData -> (LVRHStateParam -> StreamData -> y) -> y)
 
 data LVRHStateParam
   = LVRHStateParam
@@ -24,7 +28,10 @@ data LVRHStateParam
     barTops :: [Double], -- Sequence of bar top prices. Open/Close price for Red/Green bars.
     barHighs :: [Double], -- Sequence of bar high prices.
     resLevels :: [Double], -- Resistance price levels.
-    genResLevels :: [Double] -> [Double] -> [Double]
+    genResLevels :: [Double] -> [Double] -> [Double],
+    hasDelayTimeElapsed :: Double -> Double -> Bool,
+    isHammer :: Double -> Double -> Double -> Double -> Bool,
+    inDeflectZone :: Double -> Double -> [Double] -> Bool
   }
   deriving (Show)
 
@@ -54,13 +61,13 @@ lvrhStateTransition stateParams (TradeData trade) =
 lvrhStateTransition stateParams (BarData bar) =
   lvrhState $
     stateParams
-      { openPrice = 1 / 0, -- infinity
-        highPrice = -(1 / 0), -- -infinity
-        lowPrice = 1 / 0, -- infinity
+      { openPrice = 1/0, -- infinity
+        highPrice = -(1/0), -- -infinity
+        lowPrice = 1/0, -- infinity
         lastPrice = 0.0,
-        openTime = 1 / 0, -- infinity
-        firstTime = 1 / 0, -- infinity
-        lastTime = -(1 / 0), -- -infinity
+        openTime = 1/0, -- infinity
+        firstTime = 1/0, -- infinity
+        lastTime = -(1/0), -- -infinity
         barTops = newBarTops,
         barHighs = newBarHighs,
         resLevels = newResLevels -- getResLevels newBarTops newBarHighs
@@ -69,18 +76,34 @@ lvrhStateTransition stateParams (BarData bar) =
     newBarTops = barTops stateParams ++ [max (open bar) (close bar)]
     newBarHighs = barHighs stateParams ++ [high bar]
     newResLevels = sort $ (genResLevels stateParams) newBarHighs newBarHighs
+
 lvrhBuyLogic :: Bool -> LVRHStateParam -> StreamData -> Bool
+lvrhBuyLogic buyStateParams stateParams (BarData bar) = False
 lvrhBuyLogic buyStateParams stateParams (TradeData trade) = 
   not buyStateParams &&
-  lastTime stateParams - firstTime stateParams > 0.5 &&    -- Wait time to ensure open price is accurate.
-  lastPrice stateParams > openPrice stateParams + 0.05 &&  -- Bar body length.
-  lastPrice stateParams == highPrice stateParams &&        -- Last price is highest point of bar.
-  openPrice stateParams - lowPrice stateParams >= 0.15 &&  -- Bottom Wick length.
-  inDeflectionZone (lowPrice stateParams) (resLevels stateParams) (lastPrice stateParams) 0.02 -- Wick "touches" or is near resistance level.
-lvrhBuyLogic buyStateParams stateParams (BarData bar) = False
+  hasDelayTimeElapsed stateParams 
+    (firstTime stateParams) (lastTime stateParams) && -- Wait time to ensure open price is accurate.
+  isHammer stateParams 
+    (openPrice stateParams) (highPrice stateParams) (lowPrice stateParams) (lastPrice stateParams) &&
+  inDeflectZone stateParams 
+    (lowPrice stateParams) (lastPrice stateParams) (resLevels stateParams)  -- Wick "touches" or is near resistance level.
 
-inDeflectionZone :: Double -> [Double] -> Double -> Double -> Bool
-inDeflectionZone point sortedResLevels lastPrice tolerance = 
-  case (length $ takeWhile (<=lastPrice) (sortedResLevels)) - 1 of
-    -1 -> False
-    i -> abs (point - sortedResLevels !! i) <= tolerance
+initLVRH :: Double -> Double -> Double -> Double -> Double -> Double -> Double -> Double -> Double -> LVRHState
+initLVRH minResPillars resTolerance minBodyLen maxUpperWickLen minLowerWickLen deflecTolerance delay rtol atol =
+  lvrhState $ LVRHStateParam 
+    {
+      openPrice = 1/0, 
+      highPrice = -(1/0),
+      lowPrice = 1/0, 
+      lastPrice = 0.0,
+      openTime = 1/0,
+      firstTime = 1/0, 
+      lastTime = -(1/0),
+      barTops = [], 
+      barHighs = [],
+      resLevels = [], 
+      genResLevels = initResistanceLevelsAcc minResPillars resTolerance rtol atol,
+      hasDelayTimeElapsed = \firstTime lastTime -> lastTime - firstTime >= delay :: Double -> Double -> Bool,
+      isHammer = isGreenHammer minBodyLen maxUpperWickLen minLowerWickLen,
+      inDeflectZone = isHammerInResDeflectZone deflecTolerance
+    }

@@ -1,12 +1,19 @@
 module Algos.BRH
-  ( brhState,
-    brhBuyLogic,
+  ( brhBuyLogic,
     brhStateTransition,
-    BRHStateParam (..),
+    BRHState,
+    initBRH
   )
 where
 
-import Lib.DataTypes (StreamData (..))
+import Lib.DataTypes (Bar (..), StreamData (..), Trade (..))
+import Lib.Hammer (isGreenHammer, isHammerInResDeflectZone)
+import Lib.LevelsAccel (initResistanceLevelsAcc)
+import Lib.Levels (resistanceLevels)
+import Data.Ord (Ord (max, min))
+import Data.List (sort)
+
+data BRHState = BRHState (forall y. StreamData -> (BRHStateParam -> StreamData -> y) -> y)
 
 data BRHStateParam
   = BRHStateParam
@@ -17,7 +24,9 @@ data BRHStateParam
     barTops :: [Double], -- Sequence of bar top prices. Open/Close price for Red/Green bars.
     barHighs :: [Double], -- Sequence of bar high prices.
     resLevels :: [Double], -- Resistance price levels.
-    genResLevels :: [Double] -> [Double] -> [Double]
+    genResLevels :: [Double] -> [Double] -> [Double],
+    isHammer :: Double -> Double -> Double -> Double -> Bool,
+    inDeflectZone :: Double -> Double -> [Double] -> Bool
   }
 
 brhState :: BRHStateParam -> StreamData -> (BRHStateParam -> StreamData -> y) -> y
@@ -44,13 +53,23 @@ brhStateTransition stateParam (BarData bar) =
 brhBuyLogic :: Bool -> BRHStateParam -> StreamData -> Bool
 brhBuyLogic buyStateParams stateParam (TradeData trade) = False
 brhBuyLogic _ stateParam (BarData bar) =
-  lastPrice stateParams > openPrice stateParams + 0.05 &&  -- Bar body length.
-  lastPrice stateParams == highPrice stateParams &&        -- Last price is highest point of bar.
-  openPrice stateParams - lowPrice stateParams >= 0.15 &&  -- Bottom Wick length.
-  inDeflectionZone (lowPrice stateParams) (resLevels stateParams) (lastPrice stateParams) 0.02 -- Wick "touches" or is near resistance level.
+  isHammer stateParams 
+    (openPrice stateParams) (highPrice stateParams) (lowPrice stateParams) (lastPrice stateParams) &&
+  inDeflectZone stateParams 
+    (lowPrice stateParams) (lastPrice stateParams) (resLevels stateParams)  -- Wick "touches" or is near resistance level.
 
-inDeflectionZone :: Double -> [Double] -> Double -> Double -> Bool
-inDeflectionZone point sortedResLevels lastPrice tolerance = 
-  case (length $ takeWhile (<=lastPrice) (sortedResLevels)) - 1 of
-    -1 -> False
-    i -> abs (point - sortedResLevels !! i) <= tolerance
+initBRH :: Double -> Double -> Double -> Double -> Double -> Double -> Double -> Double  -> LVRHState
+initBRH minResPillars resTolerance minBodyLen maxUpperWickLen minLowerWickLen deflecTolerance rtol atol =
+  brhState $ BRHStateParam 
+    {
+      openPrice = 1/0, 
+      highPrice = -(1/0),
+      lowPrice = 1/0, 
+      lastPrice = 0.0,
+      barTops = [], 
+      barHighs = [],
+      resLevels = [], 
+      genResLevels = initResistanceLevelsAcc minResPillars resTolerance rtol atol,
+      isHammer = isGreenHammer minBodyLen maxUpperWickLen minLowerWickLen,
+      inDeflectZone = isHammerInResDeflectZone deflecTolerance
+    }
