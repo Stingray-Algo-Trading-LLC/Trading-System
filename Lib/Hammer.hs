@@ -7,8 +7,8 @@ isGreenHammer minBodyLen maxUpperWickLen minLowerWickLen open high low last =
     open - low >= minLowerWickLen
 
 
-isHammerInResDeflectZone :: Double -> Double -> Double -> [Double] -> Bool
+isHammerInResDeflectZone :: Double -> Double -> Double -> [Double] -> (Bool, Double)
 isHammerInResDeflectZone tolerance low last sortedResLevels = 
     case (length $ takeWhile (<=last) (sortedResLevels)) - 1 of
-        -1 -> False
-        i -> abs (low - sortedResLevels !! i) <= tolerance
+        -1 -> (False, -1.0)
+        i -> (abs (low - sortedResLevels !! i) <= tolerance, sortedResLevels !! i)
