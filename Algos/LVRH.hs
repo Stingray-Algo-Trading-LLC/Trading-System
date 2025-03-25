@@ -7,7 +7,7 @@ module Algos.LVRH
 where
 
 import Data.Ord (Ord (max, min))
-import Lib.DataTypes (Bar (..), StreamData (..), Trade (..))
+import Lib.DataTypes (StreamData (..))
 import Lib.Utils (getSaleCondition, utcToUnixSeconds)
 import Lib.Hammer (isGreenHammer, isHammerInResDeflectZone)
 import Lib.LevelsAccel (initResistanceLevelsAcc)
@@ -148,8 +148,8 @@ data ConstantState
   }
 
 newtype AssetStateTransition = AssetStateTransition (StreamData -> (AssetState, AssetStateTransition))
-assetStateMachine :: ConstantState -> AssetState -> AssetStateTransition
-assetStateMachine constState initAssetState = AssetStateTransition $ assetStateTrans (initAssetState)
+assetStateMachine :: ConstantState -> AssetStateTransition
+assetStateMachine constState = AssetStateTransition assetStateTrans 
   where 
     assetStateTrans :: AssetState -> StreamData -> (AssetState, AssetStateTransition)
     assetStateTrans assetState (TradeData trade)
@@ -188,5 +188,13 @@ assetStateMachine constState initAssetState = AssetStateTransition $ assetStateT
         newBarTops = barTops assetState ++ [max (open bar) (close bar)]
         newBarHighs = barHighs assetState ++ [high bar]
         newResLevels = sort $ (genResLevels constState) newBarHighs newBarHighs
-
-
+    assetStateTrans assetState (BarUpdateData bar) = (newAssetState, assetStateTrans newAssetState)
+      where
+        newAssetState = assetState
+          { barTops = newBarTops,
+            barHighs = newBarHighs,
+            resLevels = newResLevels -- getResLevels newBarTops newBarHighs
+          }
+        newBarTops = safeInit (barTops assetState) ++ [max (open bar) (close bar)]
+        newBarHighs = safeInit (barHighs assetState) ++ [high bar]
+        newResLevels = sort $ (genResLevels constState) newBarHighs newBarHighs
