@@ -1,6 +1,6 @@
 {-# LANGUAGE ImportQualifiedPost #-}
 
-module Lib.Utils (getSaleCondition, utcToUnixSeconds) where
+module Lib.Utils (getSaleCondition, utcToUnixSeconds, safeInit) where
 
 
 import Data.Char (ord)
@@ -33,7 +33,9 @@ getSaleCondition conditions = if conditionCode == 6 then 2 else conditionCode
 utcToUnixSeconds :: UTCTime -> Double
 utcToUnixSeconds utcTime = realToFrac (utcTimeToPOSIXSeconds utcTime)
 
-
+--------------------------------------------------------------------------------
+-- Array exluding last element
+--------------------------------------------------------------------------------
 safeInit :: [a] -> [a]
 safeInit [] = []
 safeInit arr = init arr
