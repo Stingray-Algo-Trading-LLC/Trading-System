@@ -8,7 +8,7 @@ where
 
 import Data.Ord (Ord (max, min))
 import Lib.DataTypes (StreamData (..))
-import Lib.Utils (getSaleCondition, utcToUnixSeconds)
+import Lib.Utils (getSaleCondition, utcToUnixSeconds, safeInit)
 import Lib.Hammer (isGreenHammer, isHammerInResDeflectZone)
 import Lib.LevelsAccel (initResistanceLevelsAcc)
 import Lib.Levels (resistanceLevels)
@@ -63,7 +63,7 @@ lvrhStateTransition stateParams (TradeData trade) =
           { openPrice = if currTradeTime < openTime stateParams then price trade else openPrice stateParams,
             highPrice = max (highPrice stateParams) (price trade),
             lowPrice = min (lowPrice stateParams) (price trade),
-            lastPrice = if (saleCondition == 1) && (currTradeTime >= lastTime stateParams) then price trade else lastPrice stateParams,
+            closePrice = if (saleCondition == 1) && (currTradeTime >= lastTime stateParams) then price trade else closePrice stateParams,
             openTime = min (openTime stateParams) currTradeTime,
             firstTime = min (firstTime stateParams) currTradeTime,
             lastTime = if saleCondition == 1 then max (lastTime stateParams) currTradeTime else lastTime stateParams
@@ -77,7 +77,7 @@ lvrhStateTransition stateParams (BarData bar) =
       { openPrice = 1/0, -- infinity
         highPrice = -(1/0), -- -infinity
         lowPrice = 1/0, -- infinity
-        lastPrice = 0.0,
+        closePrice = 0.0,
         openTime = 1/0, -- infinity
         firstTime = 1/0, -- infinity
         lastTime = -(1/0), -- -infinity
@@ -97,9 +97,9 @@ lvrhBuyLogic buyStateParams stateParams (TradeData trade) =
   hasDelayTimeElapsed stateParams 
     (firstTime stateParams) (lastTime stateParams) && -- Wait time to ensure open price is accurate.
   isHammer stateParams 
-    (openPrice stateParams) (highPrice stateParams) (lowPrice stateParams) (lastPrice stateParams) &&
+    (openPrice stateParams) (highPrice stateParams) (lowPrice stateParams) (closePrice stateParams) &&
   inDeflectZone stateParams 
-    (lowPrice stateParams) (lastPrice stateParams) (resLevels stateParams)  -- Wick "touches" or is near resistance level.
+    (lowPrice stateParams) (closePrice stateParams) (resLevels stateParams)  -- Wick "touches" or is near resistance level.
 
 initLVRH :: Double -> Double -> Double -> Double -> Double -> Double -> Double -> Double -> Double -> LVRHState
 initLVRH minResPillars resTolerance minBodyLen maxUpperWickLen minLowerWickLen deflecTolerance delay rtol atol =
@@ -108,7 +108,7 @@ initLVRH minResPillars resTolerance minBodyLen maxUpperWickLen minLowerWickLen d
       openPrice = 1/0, 
       highPrice = -(1/0),
       lowPrice = 1/0, 
-      lastPrice = 0.0,
+      closePrice = 0.0,
       openTime = 1/0,
       firstTime = 1/0, 
       lastTime = -(1/0),
@@ -122,23 +122,36 @@ initLVRH minResPillars resTolerance minBodyLen maxUpperWickLen minLowerWickLen d
     }
 
 
-data AssetState
-  = AssetState
+data OhlcState
+  = OhlcState
   { openPrice :: Double, -- First qualifying trade price.
     highPrice :: Double, -- Highest price of all qualifying trades thus far.
     lowPrice :: Double, -- Lowest price of all qualifying trades thus far.
-    lastPrice :: Double, -- Last qualifying trade price. This algo only assumes trades with condition code 1.
-    openTime :: Double, -- The Unix timestamp of the last trade to update openPrice.
-    firstTime :: Double, -- The Unix timestamp of the earliest trade received, condition code is irrelevant.
-    lastTime :: Double, -- The Unix timestamp of the last trade to update lastPrice.
-    barTops :: [Double], -- Sequence of bar top prices. Open/Close price for Red/Green bars.
-    barHighs :: [Double], -- Sequence of bar high prices.
-    resLevels :: [Double], -- Resistance price levels.
-    buyLock :: Bool,
-    genOrders :: OrderStrategy
+    closePrice :: Double -- Last qualifying trade price. This algo only assumes trades with condition code 1.
   }
   deriving (Show)
 
+data TimeState
+  = TimeState
+  { openTime :: Double, -- The Unix timestamp of the last trade to update openPrice.
+    firstTime :: Double, -- The Unix timestamp of the earliest trade received, condition code is irrelevant.
+    lastTime :: Double -- The Unix timestamp of the last trade to update closePrice.
+  }
+  deriving (Show)
+
+data LevelState
+  = LevelState
+  { barTops :: [Double], -- Sequence of bar top prices. Open/Close price for Red/Green bars.
+    barHighs :: [Double], -- Sequence of bar high prices.
+    resLevels :: [Double] -- Resistance price levels.
+  }
+  deriving (Show)
+
+data OrderState
+  = OrderState
+  { buyLock :: Bool,
+    genOrders :: OrderStrategy
+  }
 data ConstantState
   = ConstantState
   { genResLevels :: [Double] -> [Double] -> [Double],
@@ -147,54 +160,63 @@ data ConstantState
     inDeflectZone :: Double -> Double -> [Double] -> (Bool, Double) 
   }
 
-newtype AssetStateTransition = AssetStateTransition (StreamData -> (AssetState, AssetStateTransition))
+newtype AssetStateTransition = AssetStateTransition (StreamData -> (OhlcState, LevelState, TimeState, AssetStateTransition))
 assetStateMachine :: ConstantState -> AssetStateTransition
 assetStateMachine constState = AssetStateTransition assetStateTrans 
   where 
-    assetStateTrans :: AssetState -> StreamData -> (AssetState, AssetStateTransition)
-    assetStateTrans assetState (TradeData trade)
+    assetStateTrans :: OhlcState -> LevelState -> TimeState -> StreamData -> (OhlcState, LevelState, TimeState, AssetStateTransition)
+    assetStateTrans ohlcSt levelSt timeSt (TradeData trade)
       | saleCondition == 0 = 
-          let newAssetState = assetState {firstTime = min (firstTime assetState) currTradeTime}
-          in (newAssetState, assetStateTrans newAssetState)
+          let newTimeSt = timeSt {firstTime = min (firstTime timeSt) currTradeTime}
+          in (ohlcSt, levelSt, newTimeSt, assetStateTrans ohlcSt levelSt newTimeSt)
       | otherwise = 
-          let newAssetState = 
-            assetState
-              { openPrice = if currTradeTime < openTime assetState then price trade else openPrice assetState,
-                highPrice = max (highPrice assetState) (price trade),
-                lowPrice = min (lowPrice assetState) (price trade),
-                lastPrice = if (saleCondition == 1) && (currTradeTime >= lastTime assetState) then price trade else lastPrice assetState,
-                openTime = min (openTime assetState) currTradeTime,
-                firstTime = min (firstTime assetState) currTradeTime,
-                lastTime = if saleCondition == 1 then max (lastTime assetState) currTradeTime else lastTime assetState
+          let newOhlcSt = 
+            ohlcSt
+              { openPrice = if currTradeTime < openTime timeSt then price trade else openPrice ohlcSt,
+                highPrice = max (highPrice ohlcSt) (price trade),
+                lowPrice = min (lowPrice ohlcSt) (price trade),
+                closePrice = if (saleCondition == 1) && (currTradeTime >= lastTime timeSt) then price trade else closePrice ohlcSt
               }
-          in (newAssetState, assetStateTrans newAssetState)
+              newTimeSt =
+            timeSt
+              { openTime = min (openTime timeSt) currTradeTime,
+                firstTime = min (firstTime timeSt) currTradeTime,
+                lastTime = if saleCondition == 1 then max (lastTime timeSt) currTradeTime else lastTime timeSt
+              }
+          in (newOhlcSt, levelSt, newTimeSt, assetStateTrans newOhlcSt levelSt newTimeSt)
       where 
         saleCondition = getSaleCondition $ condition trade
         currTradeTime = utcToUnixSeconds $ tradeTimestamp trade
-    assetStateTrans assetState (BarData bar) = (newAssetState, assetStateTrans newAssetState)
+    assetStateTrans ohlcSt levelSt timeSt (BarData bar) = (newOhlcSt, newLevelSt, newTimeSt, assetStateTrans newOhlcSt newLevelSt newTimeSt)
       where
-        newAssetState = assetState
+        newOhlcSt = ohlcSt
           { openPrice = 1/0, -- infinity
             highPrice = -(1/0), -- -infinity
             lowPrice = 1/0, -- infinity
-            lastPrice = 0.0,
-            openTime = 1/0, -- infinity
-            firstTime = 1/0, -- infinity
-            lastTime = -(1/0), -- -infinity
-            barTops = newBarTops,
-            barHighs = newBarHighs,
-            resLevels = newResLevels -- getResLevels newBarTops newBarHighs
+            closePrice = 0.0
           }
-        newBarTops = barTops assetState ++ [max (open bar) (close bar)]
-        newBarHighs = barHighs assetState ++ [high bar]
-        newResLevels = sort $ (genResLevels constState) newBarHighs newBarHighs
-    assetStateTrans assetState (BarUpdateData bar) = (newAssetState, assetStateTrans newAssetState)
-      where
-        newAssetState = assetState
+        newTimeSt = timeSt
+          { openTime = 1/0, -- infinity
+            firstTime = 1/0, -- infinity
+            lastTime = -(1/0) -- -infinity
+          }
+        newLevelSt = levelSt
           { barTops = newBarTops,
             barHighs = newBarHighs,
             resLevels = newResLevels -- getResLevels newBarTops newBarHighs
           }
-        newBarTops = safeInit (barTops assetState) ++ [max (open bar) (close bar)]
-        newBarHighs = safeInit (barHighs assetState) ++ [high bar]
+        newBarTops = barTops levelSt ++ [max (open bar) (close bar)]
+        newBarHighs = barHighs levelSt ++ [high bar]
         newResLevels = sort $ (genResLevels constState) newBarHighs newBarHighs
+    assetStateTrans ohlcSt levelSt timeSt (BarUpdateData bar) = (ohlcSt, newLevelSt, timeSt, assetStateTrans ohlcSt newLevelSt timeSt)
+      where
+        newLevelSt = levelSt
+          { barTops = newBarTops,
+            barHighs = newBarHighs,
+            resLevels = newResLevels -- getResLevels newBarTops newBarHighs
+          }
+        newBarTops = safeInit (barTops levelSt) ++ [max (open bar) (close bar)]
+        newBarHighs = safeInit (barHighs levelSt) ++ [high bar]
+        newResLevels = sort $ (genResLevels constState) newBarHighs newBarHighs
+
+        
