@@ -33,3 +33,7 @@ getSaleCondition conditions = if conditionCode == 6 then 2 else conditionCode
 utcToUnixSeconds :: UTCTime -> Double
 utcToUnixSeconds utcTime = realToFrac (utcTimeToPOSIXSeconds utcTime)
 
+
+safeInit :: [a] -> [a]
+safeInit [] = []
+safeInit arr = init arr
