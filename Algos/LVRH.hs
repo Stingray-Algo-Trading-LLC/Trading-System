@@ -150,6 +150,7 @@ data LevelState
 data OrderState
   = OrderState
   { buyLock :: Bool,
+    buyQty :: Int,
     genOrders :: OrderStrategy
   }
 data ConstantState
@@ -161,8 +162,9 @@ data ConstantState
   }
 
 newtype AssetStateTransition = AssetStateTransition (StreamData -> (OhlcState, LevelState, TimeState, AssetStateTransition))
-assetStateMachine :: ConstantState -> AssetStateTransition
-assetStateMachine constState = AssetStateTransition assetStateTrans 
+assetStateMachine :: ConstantState -> OhlcState -> LevelState -> TimeState -> AssetStateTransition
+assetStateMachine constSt initOhlcSt initLevelSt initTimeSt =
+  AssetStateTransition $ assetStateTrans initOhlcSt initLevelSt initTimeSt
   where 
     assetStateTrans :: OhlcState -> LevelState -> TimeState -> StreamData -> (OhlcState, LevelState, TimeState, AssetStateTransition)
     assetStateTrans ohlcSt levelSt timeSt (TradeData trade)
@@ -207,7 +209,7 @@ assetStateMachine constState = AssetStateTransition assetStateTrans
           }
         newBarTops = barTops levelSt ++ [max (open bar) (close bar)]
         newBarHighs = barHighs levelSt ++ [high bar]
-        newResLevels = sort $ (genResLevels constState) newBarHighs newBarHighs
+        newResLevels = sort $ (genResLevels constSt) newBarHighs newBarHighs
     assetStateTrans ohlcSt levelSt timeSt (BarUpdateData bar) = (ohlcSt, newLevelSt, timeSt, assetStateTrans ohlcSt newLevelSt timeSt)
       where
         newLevelSt = levelSt
@@ -217,6 +219,32 @@ assetStateMachine constState = AssetStateTransition assetStateTrans
           }
         newBarTops = safeInit (barTops levelSt) ++ [max (open bar) (close bar)]
         newBarHighs = safeInit (barHighs levelSt) ++ [high bar]
-        newResLevels = sort $ (genResLevels constState) newBarHighs newBarHighs
+        newResLevels = sort $ (genResLevels constSt) newBarHighs newBarHighs
 
-        
+newtype OrderStateTransition = OrderStateTransition (OhlcState -> LevelState -> TimeState -> StreamData -> ([Order], OrderStateTransition))
+orderStateMachine :: ConstantState -> OrderState -> OrderStateTransition
+orderStateMachine constSt initOrderSt =
+  OrderStateTransition $ orderStateTrans initOrderSt
+  where
+    orderStateTrans :: OrderState -> OhlcState -> LevelState -> TimeState -> StreamData -> ([Order], OrderStateTransition)
+    orderStateTrans orderSt ohlcSt levelSt timeSt (BarData _) = ([], orderStateTrans $ orderSt {buyLock = False})
+    orderStateTrans orderSt ohlcSt levelSt timeSt (BarUpdateData _) = ([], orderStateTrans $ orderSt)
+    orderStateTrans orderSt ohlcSt levelSt timeSt (TradeData trade) = 
+      (orders, orderStateTrans $ orderSt {buyLock = (buyLock orderSt) || shouldBuy, genOrders = newGenOrders })
+      where
+        (orders, newGenOrders) =
+          case genOrders orderSt of
+            TrailingOptionOrder f -> f trade qty resLevel (0.1 + closePrice ohlcSt)
+        (isDeflec, resLevel) = 
+          inDeflectZone constSt 
+            (lowPrice ohlcSt) (closePrice ohlcSt) (resLevels levelSt)  -- Wick "touches" or is near resistance level.
+        shouldBuy =
+          not (buyLock orderSt) &&
+          hasDelayTimeElapsed constSt 
+            (firstTime timeSt) (lastTime timeSt) && -- Wait time to ensure open price is accurate.
+          isHammer constSt 
+            (openPrice ohlcSt) (highPrice ohlcSt) (lowPrice ohlcSt) (closePrice ohlcSt) &&
+          isDeflec
+        qty = fromIntegral (fromEnum shouldBuy) * (buyQty orderSt)
+
+    
