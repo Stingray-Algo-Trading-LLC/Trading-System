@@ -163,12 +163,47 @@ trailingOptionOrder openOrders streamData buyQty initStopLoss initTakeProf
     noBuy = buyQty == 0
     haveOpenOrders = not $ null openOrders
     noOpenOrders = null openOrders
-    optionSymb = case streamData of
-      (TradeData t) -> 
-    marketBuy = genMarketBuy optionSymb buyQty
-    newOpenOrder = f (makeOptionSymbol streamData) buyQty initStopLoss initTakeProf
+    symbol = genOtmCallOptionSymb streamData
+    marketBuy = genMarketBuy symbol buyQty
+    newOpenOrder = f symbol buyQty initStopLoss initTakeProf
     nextStrategy = OrderStrategy . trailingOptionOrder
+{-# LANGUAGE OverloadedStrings #-}
+import Data.Time (UTCTime, toGregorian, utctDay)
+import Data.Text (unpack)
+import Text.Printf (printf)
 
+data OptionType = Call | Put 
+instance Show OptionType where
+  show Call = "C" 
+  show Put = "P"
+
+
+genOptionSymb :: String -> UTCTime -> Double -> String -> String
+genOptionSymb underlyingSymb timestamp strikePrice optionType = 
+  let (fullYear, month, day) = toGregorian $ utctDay timestamp
+    yyStr = printf "%02d" (fullYear `mod` 100 :: Int)
+    mmStr = printf "%02d" (month :: Int)
+    ddStr = printf "%O2d" (day :: Int)
+    strkStr = printf "%08d" (strikePrice * 1000)
+  in underlyingSymb ++ yyStr ++ mmStr ++ ddStr ++ optionType ++ strkStr
+
+genOtmOptionSymb :: StreamData -> OptionType -> String
+genOtmOptionSymb streamData optionType = go streamData 
+  where
+    genStrike :: Double -> Int
+    genStrike currPrice =  case optionType of
+      Call -> ceiling $ currPrice
+      Put -> floor $ currPrice
+    go :: StreamData -> String
+    go (TradeData trade) = 
+      genOptionSymb (unpack $ tradeSymbol trade)  (tradeTimestamp trade) (genStrike $ price trade) (show optionType)
+    go (BarData bar) = 
+      genOptionSymb (unpack $ barSymbol bar)  (barTimestamp bar) (genStrike $ close bar) (show optionType)
+    go (BarUpdateData bar) =
+      genOptionSymb (unpack $ barSymbol bar)  (barTimestamp bar) (genStrike $ close bar) (show optionType)
+  
+
+    
 instance Show OrderOutput where
   show (O1 o) = "O1 " ++ show o
   show (O2 (o, _)) = "O2 (" ++ show o ++ ", <function>)"
