@@ -126,7 +126,7 @@ orderStateMachine constSt initOrderSt =
       where
         (orders, newGenOrders) =
           case genOrders orderSt of
-            TrailingOptionOrder f -> f trade qty resLevel (0.1 + closePrice ohlcSt)
+            TrailingOptionOrder f -> f (TradeData trade) qty resLevel (0.1 + closePrice ohlcSt)
         (isDeflec, resLevel) = 
           inDeflectZone constSt 
             (lowPrice ohlcSt) (closePrice ohlcSt) (resLevels levelSt)  -- Wick "touches" or is near resistance level.
@@ -145,28 +145,28 @@ data OrderOutput = O1 Order | O2 (Order, Int -> OrderOutput) | O3 (Int -> OrderO
 trailingOptionOrder :: [OpenOrder] -> StreamData -> Int -> Double -> Double -> ([Order], OrderStrategy)
 trailingOptionOrder openOrders streamData buyQty initStopLoss initTakeProf
   | noOpenOrders && noBuy = ([], nextStrategy [])
-  | noOpenOrders && haveBuy =
-    ([marketBuy], 
-      OrderStrategy $ 
-        trailingOptionOrder [newOpenOrder])
+  | noOpenOrders && haveBuy = ([marketBuy], nextStrategy [newOpenOrder])
   | haveOpenOrders && noBuy = 
     let (orders, newOpenOrders) = queryOpenOrders ([],[]) openOrders price
     in (orders, nextStrategy newOpenOrders)
   | haveOpenOrders && haveBuy =
-    let initOrderTup = 
-      ([marketBuy], 
-        [newOpenOrder])
+    let initOrderTup = ([marketBuy], [newOpenOrder])
         (orders, newOpenOrders) = queryOpenOrders initOrderTup openOrders price
     in (orders, nextStrategy newOpenOrders)
   where
+    (undSymb, price, timestamp) = case streamData of
+      (TradeData t) -> (tradeSymbol t, price t, tradeTimestamp t)
+      (BarData b) -> (barSymbol b, close b, barTimestamp b)
+      (BarUpdateData b) -> (barSymbol b, close b, barTimestamp b)
     haveBuy = buyQty > 0
     noBuy = buyQty == 0
     haveOpenOrders = not $ null openOrders
     noOpenOrders = null openOrders
-    symbol = genOtmCallOptionSymb streamData
-    marketBuy = genMarketBuy symbol buyQty
-    newOpenOrder = f symbol buyQty initStopLoss initTakeProf
+    optSymbol = genOtmOptionSymb undSymb timestamp price Call
+    marketBuy = genMarketBuy optSymbol buyQty
+    newOpenOrder = f optSymbol buyQty initStopLoss initTakeProf
     nextStrategy = OrderStrategy . trailingOptionOrder
+    
 {-# LANGUAGE OverloadedStrings #-}
 import Data.Time (UTCTime, toGregorian, utctDay)
 import Data.Text (unpack)
@@ -187,23 +187,14 @@ genOptionSymb underlyingSymb timestamp strikePrice optionType =
     strkStr = printf "%08d" (strikePrice * 1000)
   in underlyingSymb ++ yyStr ++ mmStr ++ ddStr ++ optionType ++ strkStr
 
-genOtmOptionSymb :: StreamData -> OptionType -> String
-genOtmOptionSymb streamData optionType = go streamData 
+genOtmOptionSymb :: String -> UTCTime -> Double -> OptionType -> String
+genOtmOptionSymb undSymb timestamp currPrice optionType = 
+  genOptionSymb undSymb timestamp strikePrice (show optionType)
   where
-    genStrike :: Double -> Int
-    genStrike currPrice =  case optionType of
+    strikePrice =  case optionType of
       Call -> ceiling $ currPrice
       Put -> floor $ currPrice
-    go :: StreamData -> String
-    go (TradeData trade) = 
-      genOptionSymb (unpack $ tradeSymbol trade)  (tradeTimestamp trade) (genStrike $ price trade) (show optionType)
-    go (BarData bar) = 
-      genOptionSymb (unpack $ barSymbol bar)  (barTimestamp bar) (genStrike $ close bar) (show optionType)
-    go (BarUpdateData bar) =
-      genOptionSymb (unpack $ barSymbol bar)  (barTimestamp bar) (genStrike $ close bar) (show optionType)
-  
 
-    
 instance Show OrderOutput where
   show (O1 o) = "O1 " ++ show o
   show (O2 (o, _)) = "O2 (" ++ show o ++ ", <function>)"
