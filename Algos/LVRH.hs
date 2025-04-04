@@ -154,10 +154,7 @@ trailingOptionOrder openOrders streamData buyQty initStopLoss initTakeProf
         (orders, newOpenOrders) = queryOpenOrders initOrderTup openOrders price
     in (orders, nextStrategy newOpenOrders)
   where
-    (undSymb, price, timestamp) = case streamData of
-      (TradeData t) -> (tradeSymbol t, price t, tradeTimestamp t)
-      (BarData b) -> (barSymbol b, close b, barTimestamp b)
-      (BarUpdateData b) -> (barSymbol b, close b, barTimestamp b)
+    (undSymb, price, timestamp) = extractSymPriceTs streamData
     haveBuy = buyQty > 0
     noBuy = buyQty == 0
     haveOpenOrders = not $ null openOrders
@@ -166,6 +163,14 @@ trailingOptionOrder openOrders streamData buyQty initStopLoss initTakeProf
     marketBuy = genMarketBuy optSymbol buyQty
     newOpenOrder = f optSymbol buyQty initStopLoss initTakeProf
     nextStrategy = OrderStrategy . trailingOptionOrder
+
+extractBarSymPriceTs :: Bar -> (String, Double, UTCTime)
+extractBarSymPriceTs b = (barSymbol b, close b, barTimestamp b)
+
+extractSymPriceTs :: StreamData -> (String, Double, UTCTime)
+extractSymPriceTs (TradeData t) = (tradeSymbol t, price t, tradeTimestamp t)
+extractSymPriceTs (BarData b) = extractBarSymPriceTs b
+extractSymPriceTs (BarUpdateData b) = extractBarSymPriceTs b
 
 {-# LANGUAGE OverloadedStrings #-}
 import Data.Time (UTCTime, toGregorian, utctDay)
@@ -212,6 +217,20 @@ trailingTakeProfitStopLossState sl tk p -- stop-loss, take-profit, price
   | p <= sl = O1 (False)
   | otherwise = O3 (trailingTakeProfitStopLossState tk sl)
 
+data OpenOrder = OpenOrder (Double -> OrderOutput)
+data OrderOutput = O1 Order | O2 (Order, OpenOrder) | O3 OpenOrder
+
+genTrailStpLsTkPrfOrd :: String -> Int -> Double -> Double -> Double -> OrderOutput
+genTrailStpLsTkPrfOrd symb qty sl tk p 
+  | shouldSellRemains = O1 $ genMarketSell symb qty
+  | shouldSellOne = O2 (genMarketSell symb 1, genTrailStpLsTkPrfOrd symb (qty-1) (sl+0.1) (tk+0.1))
+  | otherwise = O3 $ genTrailStpLsTkPrfOrd symb qty sl tk
+  where
+    tkPrfTrigg = p >= tk 
+    tkPrfWthOneShrTrigg = tkPrfTrigg && (qty == 1)
+    stpLsTrigg = p <= sl
+    shouldSellRemains = tkPrfWthOneShrTrigg || stpLsTrigg
+    shouldSellOne = tkPrfTrigg && (qty > 1)
 
 marketBuyOrder
 func :: Int -> [OrderOutput] -> ([OrderOutput], [OrderOutput]) -> ([OrderOutput], [OrderOutput]) 
