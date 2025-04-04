@@ -166,7 +166,7 @@ trailingOptionOrder openOrders streamData buyQty initStopLoss initTakeProf
     marketBuy = genMarketBuy optSymbol buyQty
     newOpenOrder = f optSymbol buyQty initStopLoss initTakeProf
     nextStrategy = OrderStrategy . trailingOptionOrder
-    
+
 {-# LANGUAGE OverloadedStrings #-}
 import Data.Time (UTCTime, toGregorian, utctDay)
 import Data.Text (unpack)
@@ -177,23 +177,29 @@ instance Show OptionType where
   show Call = "C" 
   show Put = "P"
 
+parseYMD :: UTCTime -> (Integer, Int, Int)
+parseYMD t = 
+  let (yyyy, mm, dd) = toGregorian $ utctDay t
+  in (yyyy, fromIntegral mm, fromIntegral dd)
 
-genOptionSymb :: String -> UTCTime -> Double -> String -> String
-genOptionSymb underlyingSymb timestamp strikePrice optionType = 
-  let (fullYear, month, day) = toGregorian $ utctDay timestamp
-    yyStr = printf "%02d" (fullYear `mod` 100 :: Int)
-    mmStr = printf "%02d" (month :: Int)
-    ddStr = printf "%O2d" (day :: Int)
-    strkStr = printf "%08d" (strikePrice * 1000)
-  in underlyingSymb ++ yyStr ++ mmStr ++ ddStr ++ optionType ++ strkStr
+roundStrike :: OptionType -> Double -> Int
+roundStrike Call p = ceiling p
+roundStrike Put p = floor p
+
+formatOption :: String -> String -> (Integer, Int, Int) -> Int -> String
+formatOption undSymb optTypeStr (yyyy, mm, dd) strike =
+  let yyStr = printf "%02d" (yyyy `mod` 100)
+      mmStr = printf "%02d" mm
+      ddStr = printf "%O2d" dd
+      strkStr = printf "%08d" (strike * 1000)
+  in undSymb ++ yyStr ++ mmStr ++ ddStr ++ optTypeStr ++ strkStr
 
 genOtmOptionSymb :: String -> UTCTime -> Double -> OptionType -> String
-genOtmOptionSymb undSymb timestamp currPrice optionType = 
-  genOptionSymb undSymb timestamp strikePrice (show optionType)
-  where
-    strikePrice =  case optionType of
-      Call -> ceiling $ currPrice
-      Put -> floor $ currPrice
+genOtmOptionSymb undSymb timestamp currPrice optType = 
+  let ymd = parseYMD timestamp
+      strike = roundStrike optType currPrice
+  in formatOption undSymb (show optType) ymd strike
+
 
 instance Show OrderOutput where
   show (O1 o) = "O1 " ++ show o
