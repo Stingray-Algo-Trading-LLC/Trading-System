@@ -206,31 +206,37 @@ genOtmOptionSymb undSymb timestamp currPrice optType =
   in formatOption undSymb (show optType) ymd strike
 
 
-instance Show OrderOutput where
-  show (O1 o) = "O1 " ++ show o
-  show (O2 (o, _)) = "O2 (" ++ show o ++ ", <function>)"
-  show (O3 _) = "O3 <function>"
 
-trailingTakeProfitStopLossState :: Double -> Double -> Double -> OrderOutput
-trailingTakeProfitStopLossState sl tk p -- stop-loss, take-profit, price
-  | p >= tk = O2 (True, trailingTakeProfitStopLossState (tk+10) (sl+10))
-  | p <= sl = O1 (False)
-  | otherwise = O3 (trailingTakeProfitStopLossState tk sl)
+data OrderTracker = OrderTracker (Double -> TrackerOutput)
+data TrackerOutput = EmptyOrder | O1 OrderTracker | O2 (Order, OrderTracker)
 
-data OpenOrder = OpenOrder (Double -> OrderOutput)
-data OrderOutput = O1 Order | O2 (Order, OpenOrder) | O3 OpenOrder
-
-genTrailStpLsTkPrfOrd :: String -> Int -> Double -> Double -> Double -> OrderOutput
-genTrailStpLsTkPrfOrd symb qty sl tk p 
-  | shouldSellRemains = O1 $ genMarketSell symb qty
-  | shouldSellOne = O2 (genMarketSell symb 1, genTrailStpLsTkPrfOrd symb (qty-1) (sl+0.1) (tk+0.1))
-  | otherwise = O3 $ genTrailStpLsTkPrfOrd symb qty sl tk
+instance Show TrackerOutput where
+  show (EmptyOrder) = "Empty Order"
+  show (O1 _) = "O1 <OrderTracker>"
+  show (O2 (o, _)) = "O2 (" ++ show o ++ ", <OrderTracker>)"
+  
+initTrailSlTkTrckr :: Int -> Int -> Double -> Double -> f
+initTrailSlTkTrckr slQty tkQty slDiff tkDiff = genTrailSlTkTrckr
   where
-    tkPrfTrigg = p >= tk 
-    tkPrfWthOneShrTrigg = tkPrfTrigg && (qty == 1)
-    stpLsTrigg = p <= sl
-    shouldSellRemains = tkPrfWthOneShrTrigg || stpLsTrigg
-    shouldSellOne = tkPrfTrigg && (qty > 1)
+    genTrailSellAmt = initTrailSellAmt slQty tkQty
+    genTrailSlTkTrckr :: String -> Int -> Double -> Double -> Double -> TrackerOutput
+    genTrailSlTkTrckr symb qty sl tk p
+      | noQty         = EmptyOrder
+      | noTrggr       = O1 $ genTrailSlTkTrckr symb qty sl tk
+      | otherwise     = O2 (sellOrd, genTrailSlTkTrckr symb (qty-sellAmt) (p-slDiff) (p+tkDiff))
+      where
+        sellAmt = genTrailSellAmt qty sl tk p
+        sellOrd = genMarketSell symb sellAmt
+        noQty   = sellAmt == 0
+        noTrggr = sellAmt == -1
+
+initTrailSellAmt :: Int -> Int -> Int -> Double -> Double -> Double -> Int 
+initTrailSellAmt slQty tkQty qty sl tk p   
+  | p >= tk = minQty tkQty
+  | p <= sl = minQty slQty
+  | otherwise = -1
+  where 
+    minQty = min qty
 
 marketBuyOrder
 func :: Int -> [OrderOutput] -> ([OrderOutput], [OrderOutput]) -> ([OrderOutput], [OrderOutput]) 
