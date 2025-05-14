@@ -187,10 +187,6 @@ parseYMD t =
   let (yyyy, mm, dd) = toGregorian $ utctDay t
   in (yyyy, fromIntegral mm, fromIntegral dd)
 
-roundStrike :: OptionType -> Double -> Int
-roundStrike Call p = ceiling p
-roundStrike Put p = floor p
-
 formatOption :: String -> String -> (Integer, Int, Int) -> Int -> String
 formatOption undSymb optTypeStr (yyyy, mm, dd) strike =
   let yyStr = printf "%02d" (yyyy `mod` 100)
@@ -198,13 +194,6 @@ formatOption undSymb optTypeStr (yyyy, mm, dd) strike =
       ddStr = printf "%O2d" dd
       strkStr = printf "%08d" (strike * 1000)
   in undSymb ++ yyStr ++ mmStr ++ ddStr ++ optTypeStr ++ strkStr
-
-genOtmOptionSymb :: String -> UTCTime -> Double -> OptionType -> String
-genOtmOptionSymb undSymb timestamp currPrice optType = 
-  let ymd = parseYMD timestamp
-      strike = roundStrike optType currPrice
-  in formatOption undSymb (show optType) ymd strike
-
 
 
 data OrderTracker = OrderTracker (Double -> TrackerOutput)
@@ -214,7 +203,54 @@ instance Show TrackerOutput where
   show (EmptyOrder) = "Empty Order"
   show (O1 _) = "O1 <OrderTracker>"
   show (O2 (o, _)) = "O2 (" ++ show o ++ ", <OrderTracker>)"
-  
+
+data Side = Buy | Sell
+instance Show Side where
+  show Buy = "buy"
+  show Sell = "sell"
+
+
+data Order 
+  = Order 
+  {
+    symbol :: String,
+    qty :: String,
+    side :: String,
+    type :: String,
+    time_in_force :: String,
+  }
+
+
+data StrikeType = OTM | ITM
+instance Show StrikeType where
+  show OTM = "OTM"
+  show ITM = "ITM"
+
+roundStrike :: OptionType -> StrikeType -> Int -> Double -> Int
+roundStrike optType strkType depth undPrice
+  | shouldGoUpChain = (ceiling undPrice) + depth
+  | shouldGoDownChain = (floor undPrice) - depth
+  where
+    shouldGoUpChain = (optType == Call && strkType == OTM) || (optType == Put && strkType == ITM)
+    shouldGoDownChain = (optType == Call && strkType == ITM) || (optType == Put && strkType == OTM)
+
+
+genMarketOrder :: String -> Int -> Side -> Order
+genMarketOrder symb qty side = 
+  Order symb (show qty) (show side) "market" "day"
+
+genOptOrder :: String -> Int -> Side -> OptionType -> StrikeType -> Int -> Double -> UTCTime -> Order
+genOptOrder undSymb qty side optType strkType depth undPrice timestamp =
+
+  where
+    optSymb = genOptSymb
+
+genOptSymb :: String -> OptionType -> StrikeType -> Int -> Double -> UTCTime -> String
+genOptSymb undSymb optType strkType depth undPrice timestamp = 
+  let ymd = parseYMD timestamp
+      strike = roundStrike optType strkType depth undPrice
+  in formatOption undSymb (show optType) ymd strike
+
 initTrailSlTkTrckr :: Int -> Int -> Double -> Double -> f
 initTrailSlTkTrckr slQty tkQty slDiff tkDiff = genTrailSlTkTrckr
   where
